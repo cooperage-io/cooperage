@@ -217,3 +217,4 @@ Cap CPU and memory per container at registration time so one tenant can't starve
 - **`cooperage_list_sessions` tool** — expose active sessions to the LLM
 - **Resource usage telemetry** — track CPU/memory per session, expose via gateway tool
 - **Web UI** — session dashboard, server registry management, live container logs
+- **Live workspace viewer** — real-time file tree of `/workspace` that updates as the agent writes files; click to preview (text inline, images rendered, JSON pretty-printed). Goes through the workspace MCP server so it works on both Docker and K8s backends. Makes the shared volume concept visceral for demos.
