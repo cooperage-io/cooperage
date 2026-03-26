@@ -158,12 +158,20 @@ async def _run_proxy(gateway_url: str) -> None:
             if not body:
                 continue
             try:
+                msg = json.loads(body)
+            except Exception:
+                continue
+            # Notifications have no "id" — fire and forget, no response written
+            is_notification = "id" not in msg
+            try:
                 resp = await client.post(gateway_url, content=body, headers=headers)
                 resp.raise_for_status()
-                write_message(resp.text)
+                if not is_notification and resp.text.strip():
+                    write_message(resp.text)
             except Exception as e:
-                error = {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": str(e)}}
-                write_message(json.dumps(error))
+                if not is_notification:
+                    error = {"jsonrpc": "2.0", "id": msg.get("id"), "error": {"code": -32603, "message": str(e)}}
+                    write_message(json.dumps(error))
 
 
 @app.command()
