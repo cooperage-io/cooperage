@@ -19,6 +19,7 @@ import numpy as np
 import uvicorn
 from PIL import Image
 from mcp.server.fastmcp import FastMCP
+from mcp.types import TextContent
 
 WORKSPACE = Path(os.environ.get("COOPERAGE_WORKSPACE", "/workspace"))
 WORKSPACE.mkdir(parents=True, exist_ok=True)
@@ -95,23 +96,22 @@ _GENERATORS = {
 }
 
 
-# ── MCP tools ─────────────────────────────────────────────────────────────────
+# ── Internal helpers (used by MCP tool and tests) ─────────────────────────────
 
-@mcp.tool()
-def generate_scene(
-    scene_type: Literal["terrain", "urban", "coastal"],
-    width: int = 512,
-    height: int = 512,
+def _generate_scene(
+    scene_type: str,
+    width: int,
+    height: int,
     seed: int | None = None,
-) -> str:
-    """Generate synthetic satellite imagery and save it to /workspace.
-    Returns image stats and file paths.
-    Other Cooperage servers in the same session can read the output from /workspace."""
+) -> dict:
+    """Generate a scene and write files; return the metadata dict."""
+    if scene_type not in _GENERATORS:
+        raise ValueError(f"Unknown scene_type: {scene_type!r}. Choose from {list(_GENERATORS)}")
+
     rng = np.random.default_rng(seed)
     pixels = _GENERATORS[scene_type](width, height, rng)
 
-    img_path = WORKSPACE / "scene.png"
-    Image.fromarray(pixels, mode="RGB").save(img_path)
+    Image.fromarray(pixels, mode="RGB").save(WORKSPACE / "scene.png")
 
     stats = {
         "mean_r": round(float(pixels[:, :, 0].mean()), 2),
@@ -127,14 +127,45 @@ def generate_scene(
         "width": width,
         "height": height,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "files": {
-            "image": "scene.png",
-            "metadata": "scene_meta.json",
-        },
+        "files": {"image": "scene.png", "metadata": "scene_meta.json"},
         "stats": stats,
     }
     (WORKSPACE / "scene_meta.json").write_text(json.dumps(meta, indent=2))
+    return meta
 
+
+async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    """Async tool dispatcher — mirrors FastMCP routing for direct testing."""
+    if name == "generate_scene":
+        meta = _generate_scene(
+            scene_type=arguments.get("scene_type", "terrain"),
+            width=int(arguments.get("width", 512)),
+            height=int(arguments.get("height", 512)),
+            seed=arguments.get("seed"),
+        )
+        return [TextContent(type="text", text=json.dumps(meta, indent=2))]
+
+    if name == "list_workspace":
+        files = sorted(p.name for p in WORKSPACE.iterdir() if p.is_file())
+        text = "\n".join(files) if files else "(empty)"
+        return [TextContent(type="text", text=text)]
+
+    return [TextContent(type="text", text=f"Unknown tool: {name!r}")]
+
+
+# ── MCP tools ─────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+def generate_scene(
+    scene_type: Literal["terrain", "urban", "coastal"],
+    width: int = 512,
+    height: int = 512,
+    seed: int | None = None,
+) -> str:
+    """Generate synthetic satellite imagery and save it to /workspace.
+    Returns image stats and file paths.
+    Other Cooperage servers in the same session can read the output from /workspace."""
+    meta = _generate_scene(scene_type, width, height, seed)
     return json.dumps(meta, indent=2)
 
 
