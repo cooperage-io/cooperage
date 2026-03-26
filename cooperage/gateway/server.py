@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 app = Server("cooperage-gateway")
 
-# ── Built-in workspace server ─────────────────────────────────────────────────
+# ── Built-in servers ──────────────────────────────────────────────────────────
 
 _WORKSPACE_SERVER_NAME = "__workspace__"
 _WORKSPACE_IMAGE = "cooperage-workspace:latest"
@@ -45,12 +45,26 @@ _WORKSPACE_SERVER_DEF = ServerDef(
     description="Built-in workspace server — read/write files in the session volume.",
 )
 
+_COMPUTE_SERVER_NAME = "__compute__"
+_COMPUTE_IMAGE = "cooperage-compute:latest"
+_COMPUTE_SERVER_DEF = ServerDef(
+    name=_COMPUTE_SERVER_NAME,
+    image=_COMPUTE_IMAGE,
+    port=8000,
+    description="Built-in compute server — execute Python scripts with numpy/pandas/scipy/sklearn.",
+)
 
-def _ensure_workspace_registered() -> None:
-    """Register the built-in workspace server if not already present."""
+_BUILTIN_SERVER_NAMES = {_WORKSPACE_SERVER_NAME, _COMPUTE_SERVER_NAME}
+
+
+def _ensure_builtins_registered() -> None:
+    """Register built-in servers if not already present."""
     if registry.get(_WORKSPACE_SERVER_NAME) is None:
         registry.register(_WORKSPACE_SERVER_DEF)
         logger.info("Auto-registered built-in workspace server (%s)", _WORKSPACE_IMAGE)
+    if registry.get(_COMPUTE_SERVER_NAME) is None:
+        registry.register(_COMPUTE_SERVER_DEF)
+        logger.info("Auto-registered built-in compute server (%s)", _COMPUTE_IMAGE)
 
 
 # ── Tool definitions ──────────────────────────────────────────────────────────
@@ -175,6 +189,25 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["session_id"],
             },
         ),
+        types.Tool(
+            name="cooperage_run_script",
+            description=(
+                "Execute a Python script in the session's compute container. "
+                "The /workspace directory is available as the 'workspace' variable — "
+                "read inputs from it and write results back. "
+                "numpy, pandas, scipy, matplotlib, and scikit-learn are pre-installed. "
+                "To install additional packages, call: "
+                "import subprocess; subprocess.run(['uv', 'pip', 'install', '<pkg>'], check=True)"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "script": {"type": "string", "description": "Python script to execute"},
+                },
+                "required": ["session_id", "script"],
+            },
+        ),
     ]
 
 
@@ -217,6 +250,8 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
         return await _workspace_op(args["session_id"], "workspace_read", {"path": args["path"]})
     if name == "cooperage_workspace_list":
         return await _workspace_op(args["session_id"], "workspace_list", {})
+    if name == "cooperage_run_script":
+        return await _proxy_call_tool(args["session_id"], _COMPUTE_SERVER_NAME, "run_script", {"script": args["script"]})
     raise ValueError(f"Unknown tool: {name!r}")
 
 
@@ -230,7 +265,7 @@ def _list_servers() -> list[dict]:
             "cached": orch.image_exists(s.image),
         }
         for s in registry.load()
-        if s.name != _WORKSPACE_SERVER_NAME  # hide internal server
+        if s.name not in _BUILTIN_SERVER_NAMES  # hide internal servers
     ]
 
 
@@ -245,8 +280,8 @@ async def _pull_server(server_name: str) -> dict:
 
 async def _create_session(name: str | None) -> dict:
     session = sessions.create_session(name=name)
-    # Pre-warm workspace container in background — ready before first workspace op
-    asyncio.create_task(_warmup_workspace(session.id))
+    asyncio.create_task(_warmup_builtin(session.id, _WORKSPACE_SERVER_DEF))
+    asyncio.create_task(_warmup_builtin(session.id, _COMPUTE_SERVER_DEF))
     return {
         "session_id": session.id,
         "name": session.name,
@@ -255,14 +290,12 @@ async def _create_session(name: str | None) -> dict:
     }
 
 
-async def _warmup_workspace(session_id: str) -> None:
+async def _warmup_builtin(session_id: str, server_def: ServerDef) -> None:
     try:
-        await asyncio.to_thread(
-            sessions.get_or_start_container, session_id, _WORKSPACE_SERVER_DEF
-        )
-        logger.info("Workspace container ready for session %s", session_id[:8])
+        await asyncio.to_thread(sessions.get_or_start_container, session_id, server_def)
+        logger.info("%s container ready for session %s", server_def.name, session_id[:8])
     except Exception as e:
-        logger.warning("Workspace pre-warm failed for session %s: %s", session_id[:8], e)
+        logger.warning("%s pre-warm failed for session %s: %s", server_def.name, session_id[:8], e)
 
 
 def _end_session(session_id: str) -> dict:
@@ -329,7 +362,7 @@ async def _proxy_call_tool(
 async def run_stdio() -> None:
     """Run the gateway over stdio (for Claude Desktop / MCP CLI)."""
     from cooperage.session.manager import start_cleanup_thread
-    _ensure_workspace_registered()
+    _ensure_builtins_registered()
     start_cleanup_thread()
     async with stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())
@@ -342,7 +375,7 @@ async def run_sse(host: str | None = None, port: int | None = None) -> None:
     import uvicorn
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-    _ensure_workspace_registered()
+    _ensure_builtins_registered()
     start_cleanup_thread()
 
     session_manager = StreamableHTTPSessionManager(

@@ -1,18 +1,21 @@
 """
 Cooperage Example: Analysis MCP Server
 
-Demonstrates stateful compute using a shared /workspace volume.
+Demonstrates domain-specific compute using a shared /workspace volume.
+Use cooperage_run_script for general Python execution — this server shows
+how to build a specialized server with custom tools on top of workspace data.
+
 Tools:
-  run_script     — execute a Python snippet, capture stdout/stderr
+  analyze_scene  — compute statistics on a scene.png written by the simulator
 """
 
-import io
+import json
 import os
-import contextlib
-import traceback
 from pathlib import Path
 
+import numpy as np
 import uvicorn
+from PIL import Image
 from mcp.server.fastmcp import FastMCP
 
 WORKSPACE = Path(os.environ.get("COOPERAGE_WORKSPACE", "/workspace"))
@@ -22,26 +25,28 @@ mcp = FastMCP("cooperage-analysis", json_response=True, stateless_http=True)
 
 
 @mcp.tool()
-def run_script(script: str) -> str:
-    """Execute a Python script. The /workspace directory is available as the
-    'workspace' variable. stdout and stderr are captured and returned."""
-    stdout_buf = io.StringIO()
-    stderr_buf = io.StringIO()
-    local_vars = {"workspace": WORKSPACE}
-    try:
-        with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
-            exec(compile(script, "<cooperage-script>", "exec"), local_vars)  # noqa: S102
-    except Exception:
-        stderr_buf.write(traceback.format_exc())
+def analyze_scene() -> str:
+    """Compute per-channel statistics on scene.png in /workspace.
+    Run the simulator's generate_scene tool first to produce the image."""
+    img_path = WORKSPACE / "scene.png"
+    if not img_path.exists():
+        return "scene.png not found in /workspace. Run generate_scene first."
 
-    out = stdout_buf.getvalue()
-    err = stderr_buf.getvalue()
-    parts = []
-    if out:
-        parts.append(f"stdout:\n{out}")
-    if err:
-        parts.append(f"stderr:\n{err}")
-    return "\n".join(parts) if parts else "(no output)"
+    pixels = np.array(Image.open(img_path).convert("RGB"))
+    result = {
+        "shape": list(pixels.shape),
+        "channels": {
+            "red":   {"mean": round(float(pixels[:, :, 0].mean()), 2), "std": round(float(pixels[:, :, 0].std()), 2)},
+            "green": {"mean": round(float(pixels[:, :, 1].mean()), 2), "std": round(float(pixels[:, :, 1].std()), 2)},
+            "blue":  {"mean": round(float(pixels[:, :, 2].mean()), 2), "std": round(float(pixels[:, :, 2].std()), 2)},
+        },
+        "overall": {
+            "min": int(pixels.min()),
+            "max": int(pixels.max()),
+            "std": round(float(pixels.std()), 2),
+        },
+    }
+    return json.dumps(result, indent=2)
 
 
 if __name__ == "__main__":

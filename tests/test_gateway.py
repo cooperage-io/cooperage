@@ -107,7 +107,7 @@ async def test_pull_server_unknown_raises(mock_get):
 # ── cooperage_create_session ────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-@patch("cooperage.gateway.server._warmup_workspace", new_callable=AsyncMock)
+@patch("cooperage.gateway.server._warmup_builtin", new_callable=AsyncMock)
 @patch("cooperage.gateway.server.sessions.create_session")
 async def test_create_session_returns_expected_keys(mock_create, mock_warmup):
     session = _session(name="test-run")
@@ -122,14 +122,14 @@ async def test_create_session_returns_expected_keys(mock_create, mock_warmup):
 
 
 @pytest.mark.asyncio
-@patch("cooperage.gateway.server._warmup_workspace", new_callable=AsyncMock)
+@patch("cooperage.gateway.server._warmup_builtin", new_callable=AsyncMock)
 @patch("cooperage.gateway.server.sessions.create_session")
-async def test_create_session_triggers_workspace_warmup(mock_create, mock_warmup):
+async def test_create_session_triggers_warmup(mock_create, mock_warmup):
     session = _session()
     mock_create.return_value = session
     from cooperage.gateway.server import _create_session
     await _create_session(None)
-    mock_warmup.assert_called_once_with(session.id)
+    assert mock_warmup.call_count == 2  # workspace + compute
 
 
 # ── cooperage_end_session ───────────────────────────────────────────────────────
