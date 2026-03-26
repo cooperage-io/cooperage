@@ -28,7 +28,14 @@ def _sessions_path() -> Path:
 def _save() -> None:
     path = _sessions_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = [s.model_dump(mode="json") for s in _sessions.values()]
+    data = []
+    for session in _sessions.values():
+        entry = session.model_dump(mode="json")
+        entry["_containers"] = {
+            name: info.model_dump()
+            for name, info in _containers.get(session.id, {}).items()
+        }
+        data.append(entry)
     path.write_text(json.dumps(data, indent=2, default=str))
 
 
@@ -39,9 +46,13 @@ def _load_from_file() -> None:
     try:
         data = json.loads(path.read_text())
         for entry in data:
+            container_data = entry.pop("_containers", {})
             session = Session(**entry)
             _sessions[session.id] = session
-            _containers[session.id] = {}
+            _containers[session.id] = {
+                name: ContainerInfo(**info)
+                for name, info in container_data.items()
+            }
     except Exception as e:
         logger.warning("Could not load sessions from %s: %s", path, e)
 
