@@ -78,6 +78,11 @@ async def list_tools() -> list[types.Tool]:
             inputSchema={"type": "object", "properties": {}, "required": []},
         ),
         types.Tool(
+            name="cooperage_list_sessions",
+            description="List all active sessions and their running containers.",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        types.Tool(
             name="cooperage_pull_server",
             description=(
                 "Pre-pull a server's Docker image so the first cooperage_call_tool "
@@ -243,6 +248,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
 async def _dispatch(name: str, args: dict[str, Any]) -> Any:
     if name == "cooperage_list_servers":
         return _list_servers()
+    if name == "cooperage_list_sessions":
+        return _list_sessions()
     if name == "cooperage_pull_server":
         return await _pull_server(args["server_name"])
     if name == "cooperage_create_session":
@@ -271,6 +278,26 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
     if name == "cooperage_run_bash":
         return await _proxy_call_tool(args["session_id"], _COMPUTE_SERVER_NAME, "run_bash", {"script": args["script"]})
     raise ValueError(f"Unknown tool: {name!r}")
+
+
+def _list_sessions() -> list[dict]:
+    all_sessions = sessions.list_sessions()
+    result = []
+    for s in all_sessions:
+        containers = []
+        for server_name, container_id in s.containers.items():
+            containers.append({
+                "server_name": server_name,
+                "container_id": container_id,
+                "builtin": server_name in _BUILTIN_SERVER_NAMES,
+            })
+        result.append({
+            "session_id": s.id,
+            "name": s.name,
+            "expires_at": s.expires_at.isoformat(),
+            "containers": containers,
+        })
+    return result
 
 
 def _list_servers() -> list[dict]:

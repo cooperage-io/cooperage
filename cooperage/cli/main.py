@@ -112,6 +112,23 @@ def start(
         asyncio.run(run_stdio())
 
 
+@app.command()
+def ui(
+    gateway: str = typer.Option("http://localhost:8080/mcp", help="Gateway URL"),
+):
+    """Open the Cooperage workspace UI in your browser."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    ui_app = Path(__file__).parent.parent.parent / "ui" / "app.py"
+    console.print(f"[green]Starting Cooperage UI[/] — gateway: {gateway}")
+    subprocess.run([
+        sys.executable, "-m", "streamlit", "run", str(ui_app),
+        "--", f"--gateway={gateway}",
+    ])
+
+
 @app.command(name="init-k8s")
 def init_k8s():
     """Bootstrap the Cooperage namespace in Kubernetes."""
