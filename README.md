@@ -181,33 +181,33 @@ cooperage register \
 
 ---
 
-## How does this compare to Docker MCP Toolkit?
+## Landscape
 
-Docker MCP Toolkit (Docker Desktop 4.62+) is a UI for running containerized MCP servers locally. It's great for individual developers who want to connect off-the-shelf tools (GitHub, Puppeteer, etc.) to Claude Desktop with zero setup.
+There are a handful of platforms that touch this space. Here's an honest read on how they compare.
 
-Cooperage targets a different problem: **multi-step agentic pipelines that need stateful, shared compute across multiple specialized servers.**
+| | Containers per session | Shared workspace across servers | Infrastructure | Image source |
+|-|------------------------|--------------------------------|----------------|--------------|
+| **Cooperage** | Multiple (one per server) | ✅ Shared `/workspace` volume | Local Docker or Kubernetes | Any registry |
+| **Docker MCP Toolkit** | Multiple (one per server) | ❌ Each container isolated | Local Docker Desktop only | Docker's curated catalog |
+| **AWS Bedrock AgentCore** | One per session (agent + tools colocated) | Partial — `/mnt/workspace` inside one container, preview, 1 GB cap | AWS only | ECR |
+| **Google ADK + Vertex AI Agent Engine** | No container orchestration for MCP servers (recommends Cloud Run separately) | ❌ Memory-based state only | GCP only | — |
+| **Azure AI Foundry** | No container orchestration — connects to externally-hosted MCP endpoints | ❌ Thread state only | Azure only | — |
+| **LangGraph Platform** | No — framework only, MCP servers hosted separately | ❌ In-memory/DB graph state | Local or SaaS | — |
+| **Composio** | No — managed SaaS integrations, no user container control | ❌ Auth state only | SaaS only | — |
 
-| | Docker MCP Toolkit | Cooperage |
-|-|-------------------|-----------|
-| **Shared workspace across servers** | No — each server is isolated | Yes — all servers in a session share `/workspace` |
-| **Session model** | Stateless | Explicit sessions with configurable TTL |
-| **Orchestration target** | Local Docker Desktop only | Docker or Kubernetes (swappable backend) |
-| **Image source** | Docker's curated catalog | Any registry — public, private, or on-prem |
-| **Target user** | Developer wanting off-the-shelf tools | Engineering org running custom simulation or data environments |
+**The column that matters most for data pipelines:**
 
-**The key feature Docker MCP Toolkit doesn't have:**
+No other platform runs multiple MCP server containers within the same session and mounts them to a shared volume. AWS AgentCore is closest — it has per-session filesystem storage — but it colocates all tools inside a single container, runs only on AWS, and the feature is in preview with a 1 GB cap. Every cloud platform (Azure, Google, Composio) treats MCP servers as remote HTTP endpoints; container lifecycle is not their problem.
 
 ```
 cooperage_call_tool(session_id, "simulator", "generate_scene", {scene_type: "urban"})
-  → container A writes /workspace/scene.png
+  → container A starts, writes /workspace/scene.png
 
 cooperage_call_tool(session_id, "analysis", "run_script", {script: "..."})
-  → container B reads /workspace/scene.png from the same volume
+  → container B starts, reads /workspace/scene.png from the same volume
 ```
 
-Two containers. One session. One shared volume. This is what enables LLM-orchestrated multi-stage pipelines — a generator, an analyzer, a report writer — each in its own isolated environment, all passing data through the workspace. Docker's toolkit has no equivalent.
-
-If your team has proprietary simulation tools already packaged as Docker images, Cooperage is the layer that lets an LLM orchestrate them at scale — on your own infrastructure, with your own registry, on Kubernetes.
+Two containers. One session. One shared volume. This is what enables LLM-orchestrated multi-stage pipelines — a generator, a solver, an analyzer, a report writer — each in its own isolated environment, passing data through the workspace. If your team has proprietary tools already packaged as Docker images, Cooperage is the layer that lets an LLM orchestrate them on your own infrastructure.
 
 ---
 
