@@ -156,10 +156,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="cooperage_workspace_read",
-            description=(
-                "Read a file from the session's /workspace volume. "
-                "Use this to reload a plan.md or prior results after context compression."
-            ),
+            description="Read a file from the session's /workspace volume.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -171,10 +168,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="cooperage_workspace_list",
-            description=(
-                "List all files currently in the session's /workspace volume. "
-                "Call this at the start of a session to check for existing plans or results."
-            ),
+            description="List all files currently in the session's /workspace volume.",
             inputSchema={
                 "type": "object",
                 "properties": {"session_id": {"type": "string"}},
