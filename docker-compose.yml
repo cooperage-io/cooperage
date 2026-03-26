@@ -1,0 +1,31 @@
+services:
+  # The Cooperage gateway (SSE mode — useful for testing with curl/Claude API)
+  gateway:
+    build: .
+    command: cooperage start --sse --host 0.0.0.0 --port 8080
+    ports:
+      - "8080:8080"
+    volumes:
+      # Must have Docker socket access to spin up sibling containers
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persist registry across restarts
+      - cooperage-registry:/root/.cooperage
+    environment:
+      - COOPERAGE_SESSION_TTL_SECONDS=${COOPERAGE_SESSION_TTL_SECONDS:-1800}
+      - COOPERAGE_CONTAINER_PORT_RANGE_START=${COOPERAGE_CONTAINER_PORT_RANGE_START:-9000}
+      - COOPERAGE_CONTAINER_PORT_RANGE_END=${COOPERAGE_CONTAINER_PORT_RANGE_END:-9999}
+    restart: unless-stopped
+
+  # Build the example analysis server image so it's available locally
+  analysis-builder:
+    build:
+      context: ./example-servers/analysis
+      dockerfile: Dockerfile
+    image: cooperage-analysis:latest
+    # Only build, don't run
+    command: echo "built"
+    profiles:
+      - build
+
+volumes:
+  cooperage-registry:
