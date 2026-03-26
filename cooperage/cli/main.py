@@ -101,8 +101,13 @@ def start(
     sse: bool = typer.Option(False, "--sse", help="Run as HTTP/SSE server instead of stdio"),
     host: str = typer.Option("0.0.0.0", help="Host to bind (SSE mode only)"),
     port: int = typer.Option(8080, help="Port to bind (SSE mode only)"),
+    proxy: str = typer.Option(None, "--proxy", help="Forward stdio to a running SSE gateway URL"),
 ):
     """Start the Cooperage MCP gateway."""
+    if proxy:
+        asyncio.run(_run_proxy(proxy))
+        return
+
     from cooperage.gateway.server import run_stdio, run_sse
 
     if sse:
@@ -110,6 +115,36 @@ def start(
         asyncio.run(run_sse(host=host, port=port))
     else:
         asyncio.run(run_stdio())
+
+
+async def _run_proxy(gateway_url: str) -> None:
+    """Bridge stdio ↔ SSE gateway. Claude Desktop speaks stdio; this forwards to HTTP."""
+    import sys
+    import httpx
+
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+
+    async def handle(line: str) -> None:
+        try:
+            resp = await client.post(gateway_url, content=line, headers=headers)
+            resp.raise_for_status()
+            sys.stdout.write(resp.text + "\n")
+            sys.stdout.flush()
+        except Exception as e:
+            import json
+            error = {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": str(e)}}
+            sys.stdout.write(json.dumps(error) + "\n")
+            sys.stdout.flush()
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        loop = asyncio.get_event_loop()
+        while True:
+            line = await loop.run_in_executor(None, sys.stdin.readline)
+            if not line:
+                break
+            line = line.strip()
+            if line:
+                asyncio.create_task(handle(line))
 
 
 @app.command()
