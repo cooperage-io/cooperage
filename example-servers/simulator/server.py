@@ -7,7 +7,6 @@ same /workspace volume within the same Cooperage session.
 
 Tools:
   generate_scene   — render synthetic satellite imagery (terrain/urban/coastal)
-  list_workspace   — list files currently in /workspace
 """
 
 import json
@@ -137,12 +136,6 @@ def generate_scene(
     (WORKSPACE / "scene_meta.json").write_text(json.dumps(meta, indent=2))
 
     return json.dumps(meta, indent=2)
-
-
-@mcp.tool()
-def list_workspace() -> list[str]:
-    """List all files currently in /workspace."""
-    return sorted(str(p.relative_to(WORKSPACE)) for p in WORKSPACE.rglob("*") if p.is_file())
 
 
 if __name__ == "__main__":
