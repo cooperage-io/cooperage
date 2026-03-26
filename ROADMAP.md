@@ -7,14 +7,122 @@
 - [x] Kubernetes orchestrator — drop-in backend, Pods + NodePort Services + hostPath workspace
 - [x] `cooperage init-k8s` CLI command
 - [x] Simulator + analysis example servers — multi-container demo verified on both backends
-- [x] 86 tests, all mocked
+- [x] Multi-container demo verified on K8s backend (Docker Desktop)
+- [x] Built-in workspace server — `cooperage_workspace_write/read/list` gateway tools, auto-registered, pre-warmed on session create
+- [x] 94 tests, all mocked
 - [x] Landscape comparison vs Docker MCP Toolkit, AgentCore, ADK, Azure Foundry, LangGraph, Composio
 
 ---
 
-## Phase 3 — Cloud Deploy
+## Phase 3 — Cloud Demo Deploy
 
-**Goal:** Run Cooperage on a real cloud K8s cluster (EKS, GKE, AKS), not just Docker Desktop.
+**Goal:** A public URL that a customer can point Claude Desktop at for a demo. Not production-scale — just always-on and accessible.
+
+### Approach: single DigitalOcean droplet
+
+One $20/mo VM running Docker. Gateway + server containers all on the same machine. Same Docker backend as local dev — no K8s needed at this stage. Fast to set up, easy to explain to a customer.
+
+```
+Customer's Claude Desktop
+        │  MCP over HTTP
+        ▼
+  your-ip:8080              ← gateway container (SSE mode)
+        │
+  [simulator] [analysis] [workspace]   ← sibling containers on same VM
+        └─────────────────┘
+         shared Docker volume
+```
+
+### Prerequisites (do these first)
+- [ ] Create DigitalOcean account (digitalocean.com) — $200 free credit for new accounts
+- [ ] Create Docker Hub account (hub.docker.com) — free, needed to push images to the VM
+- [ ] Have SSH key ready (already generated at `~/.ssh/id_ed25519`)
+
+### Steps
+
+**1. Create droplet**
+- Ubuntu 24.04, Basic plan, 2 vCPU / 4GB RAM ($24/mo) — enough for demo workloads
+- Add your SSH key (`~/.ssh/id_ed25519.pub`) during creation
+- Note the droplet's public IP
+
+**2. Install Docker on the droplet**
+```bash
+ssh root@<your-ip>
+curl -fsSL https://get.docker.com | sh
+```
+
+**3. Push images to Docker Hub**
+```bash
+# Tag and push all three server images
+docker tag cooperage-analysis:latest <your-dockerhub>/cooperage-analysis:latest
+docker tag cooperage-simulator:latest <your-dockerhub>/cooperage-simulator:latest
+docker tag cooperage-workspace:latest <your-dockerhub>/cooperage-workspace:latest
+docker push <your-dockerhub>/cooperage-analysis:latest
+docker push <your-dockerhub>/cooperage-simulator:latest
+docker push <your-dockerhub>/cooperage-workspace:latest
+
+# Build and push the gateway image
+docker buildx build --load -t <your-dockerhub>/cooperage-gateway:latest .
+docker push <your-dockerhub>/cooperage-gateway:latest
+```
+
+**4. Deploy on the droplet**
+```bash
+ssh root@<your-ip>
+docker pull <your-dockerhub>/cooperage-gateway:latest
+docker pull <your-dockerhub>/cooperage-analysis:latest
+docker pull <your-dockerhub>/cooperage-simulator:latest
+docker pull <your-dockerhub>/cooperage-workspace:latest
+
+docker run -d \
+  --name cooperage-gateway \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v cooperage-registry:/root/.cooperage \
+  -e COOPERAGE_CONTAINER_PORT_RANGE_START=9000 \
+  -e COOPERAGE_CONTAINER_PORT_RANGE_END=9999 \
+  <your-dockerhub>/cooperage-gateway:latest \
+  cooperage start --sse --host 0.0.0.0 --port 8080
+```
+
+**5. Register servers on the droplet**
+```bash
+docker exec cooperage-gateway cooperage register \
+  --name analysis \
+  --image <your-dockerhub>/cooperage-analysis:latest \
+  --description "Run Python scripts with numpy/pandas"
+
+docker exec cooperage-gateway cooperage register \
+  --name simulator \
+  --image <your-dockerhub>/cooperage-simulator:latest \
+  --description "Generate synthetic satellite imagery"
+```
+
+**6. Point Claude Desktop at it**
+
+Update `~/Library/Application Support/Claude/claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "cooperage": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/client-stdio-to-http", "http://<your-ip>:8080/mcp"]
+    }
+  }
+}
+```
+_(Or keep running locally and use the SSE gateway URL directly if the MCP client supports HTTP.)_
+
+### Code changes needed
+- `Dockerfile` (gateway): verify `cooperage start --sse` works as the container entrypoint — likely already works
+- `docker-compose.yml`: update image references to use Docker Hub tags for cloud deploy
+- Open port 8080 in DigitalOcean firewall settings
+
+### Security note
+Port 8080 will be publicly accessible. Fine for a demo, not for production. Add auth (Phase 4) before giving customers persistent access.
+
+---
 
 ### 3a. Persistent shared workspace (replace hostPath)
 
