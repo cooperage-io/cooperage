@@ -26,9 +26,44 @@ def _make_mock_k8s_client():
 
 # ── pull_image / image_exists / create_volume ─────────────────────────────────
 
-def test_pull_image_is_noop():
+@patch("cooperage.orchestrator.kubernetes._get_client")
+@patch("cooperage.orchestrator.kubernetes.time.sleep")
+@patch("cooperage.orchestrator.kubernetes.time.monotonic", side_effect=[0, 1, 2])
+def test_pull_image_spawns_and_deletes_pull_pod(mock_mono, _mock_sleep, mock_get_client):
+    client, core_api = _make_mock_k8s_client()
+    mock_get_client.return_value = client
+
+    pod_status = MagicMock()
+    pod_status.status.phase = "Succeeded"
+    core_api.read_namespaced_pod.return_value = pod_status
+
     from cooperage.orchestrator.kubernetes import pull_image
-    assert pull_image("cooperage-analysis:latest") == "cooperage-analysis:latest"
+    result = pull_image("cooperage-analysis:latest")
+
+    assert result == "cooperage-analysis:latest"
+    core_api.create_namespaced_pod.assert_called_once()
+    core_api.delete_namespaced_pod.assert_called()
+
+    # Pod name should be derived from the image name
+    meta_calls = [str(c) for c in client.V1ObjectMeta.call_args_list]
+    assert any("cooperage-pull" in c for c in meta_calls)
+
+
+@patch("cooperage.orchestrator.kubernetes._get_client")
+@patch("cooperage.orchestrator.kubernetes.time.sleep")
+@patch("cooperage.orchestrator.kubernetes.time.monotonic", side_effect=[0, 1, 2])
+def test_pull_image_still_cleans_up_on_failed_pod(mock_mono, _mock_sleep, mock_get_client):
+    client, core_api = _make_mock_k8s_client()
+    mock_get_client.return_value = client
+
+    pod_status = MagicMock()
+    pod_status.status.phase = "Failed"
+    core_api.read_namespaced_pod.return_value = pod_status
+
+    from cooperage.orchestrator.kubernetes import pull_image
+    pull_image("cooperage-analysis:latest")  # should not raise
+
+    core_api.delete_namespaced_pod.assert_called()
 
 
 def test_image_exists_always_true():

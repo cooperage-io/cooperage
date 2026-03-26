@@ -55,8 +55,56 @@ def _pick_free_port() -> int:
 # ── Image helpers ─────────────────────────────────────────────────────────────
 
 def pull_image(image: str) -> str:
-    """No-op — Kubernetes pulls images lazily on Pod creation."""
-    logger.info("K8s: pull_image is a no-op (K8s pulls on Pod creation) for %s", image)
+    """Pre-pull an image onto the node by running a short-lived Pod."""
+    client = _get_client()
+    ns = settings.k8s_namespace
+    core = client.CoreV1Api()
+
+    # Sanitize image name into a valid DNS label
+    safe = image.lower()
+    for ch in "/:.@":
+        safe = safe.replace(ch, "-")
+    pod_name = f"cooperage-pull-{safe}"[:63]
+
+    # Remove any stale pull pod
+    try:
+        core.delete_namespaced_pod(name=pod_name, namespace=ns)
+    except client.exceptions.ApiException:
+        pass
+
+    pod = client.V1Pod(
+        metadata=client.V1ObjectMeta(
+            name=pod_name,
+            namespace=ns,
+            labels={"cooperage": "true"},
+        ),
+        spec=client.V1PodSpec(
+            restart_policy="Never",
+            containers=[client.V1Container(
+                name="pull",
+                image=image,
+                command=["true"],
+            )],
+        ),
+    )
+
+    core.create_namespaced_pod(namespace=ns, body=pod)
+    logger.info("K8s: pre-pulling image %s via pod %s", image, pod_name)
+
+    # Wait for the pod to Succeed (image fully pulled and ran) — allow longer than startup timeout
+    deadline = time.monotonic() + max(settings.container_startup_timeout * 4, 120)
+    while time.monotonic() < deadline:
+        p = core.read_namespaced_pod(name=pod_name, namespace=ns)
+        if p.status.phase in ("Succeeded", "Failed"):
+            break
+        time.sleep(2)
+
+    try:
+        core.delete_namespaced_pod(name=pod_name, namespace=ns)
+    except Exception:
+        pass
+
+    logger.info("K8s: image %s is now cached on node", image)
     return image
 
 
