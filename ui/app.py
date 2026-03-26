@@ -45,9 +45,24 @@ def call_tool(tool_name: str, arguments: dict) -> str:
 
 
 def list_sessions() -> list[dict]:
-    raw = call_tool("cooperage_list_sessions", {})
+    from pathlib import Path
+    sessions_file = Path.home() / ".cooperage" / "sessions.json"
+    if not sessions_file.exists():
+        return []
     try:
-        return json.loads(raw)
+        data = json.loads(sessions_file.read_text())
+        return [
+            {
+                "session_id": s["id"],
+                "name": s.get("name"),
+                "expires_at": s.get("expires_at", ""),
+                "containers": [
+                    {"server_name": name, "container_id": cid, "builtin": name.startswith("__")}
+                    for name, cid in s.get("containers", {}).items()
+                ],
+            }
+            for s in data
+        ]
     except Exception:
         return []
 
@@ -66,11 +81,7 @@ def workspace_read(session_id: str, path: str) -> str:
 
 # ── Layout ────────────────────────────────────────────────────────────────────
 
-try:
-    all_sessions = list_sessions()
-except Exception as e:
-    st.error(f"Cannot reach gateway at {GATEWAY_URL} — is `cooperage start --sse` running?\n\n{e}")
-    st.stop()
+all_sessions = list_sessions()
 
 if not all_sessions:
     st.info("No active sessions. Create one in Claude Desktop with `cooperage_create_session`.")

@@ -101,13 +101,8 @@ def start(
     sse: bool = typer.Option(False, "--sse", help="Run as HTTP/SSE server instead of stdio"),
     host: str = typer.Option("0.0.0.0", help="Host to bind (SSE mode only)"),
     port: int = typer.Option(8080, help="Port to bind (SSE mode only)"),
-    proxy: str = typer.Option(None, "--proxy", help="Forward stdio to a running SSE gateway URL"),
 ):
     """Start the Cooperage MCP gateway."""
-    if proxy:
-        asyncio.run(_run_proxy(proxy))
-        return
-
     from cooperage.gateway.server import run_stdio, run_sse
 
     if sse:
@@ -115,63 +110,6 @@ def start(
         asyncio.run(run_sse(host=host, port=port))
     else:
         asyncio.run(run_stdio())
-
-
-async def _run_proxy(gateway_url: str) -> None:
-    """Bridge stdio ↔ SSE gateway using MCP's Content-Length framing (LSP-style)."""
-    import sys
-    import json
-    import httpx
-
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
-
-    def read_message() -> str | None:
-        """Read one Content-Length framed message from stdin."""
-        content_length = None
-        while True:
-            header = sys.stdin.readline()
-            if not header:
-                return None
-            header = header.strip()
-            if not header:
-                break  # blank line = end of headers
-            if header.lower().startswith("content-length:"):
-                content_length = int(header.split(":", 1)[1].strip())
-        if content_length is None:
-            return None
-        return sys.stdin.read(content_length)
-
-    def write_message(body: str) -> None:
-        """Write one Content-Length framed message to stdout."""
-        encoded = body.encode("utf-8")
-        sys.stdout.write(f"Content-Length: {len(encoded)}\r\n\r\n")
-        sys.stdout.write(body)
-        sys.stdout.flush()
-
-    async with httpx.AsyncClient(timeout=120) as client:
-        loop = asyncio.get_event_loop()
-        while True:
-            body = await loop.run_in_executor(None, read_message)
-            if body is None:
-                break
-            body = body.strip()
-            if not body:
-                continue
-            try:
-                msg = json.loads(body)
-            except Exception:
-                continue
-            # Notifications have no "id" — fire and forget, no response written
-            is_notification = "id" not in msg
-            try:
-                resp = await client.post(gateway_url, content=body, headers=headers)
-                resp.raise_for_status()
-                if not is_notification and resp.text.strip():
-                    write_message(resp.text)
-            except Exception as e:
-                if not is_notification:
-                    error = {"jsonrpc": "2.0", "id": msg.get("id"), "error": {"code": -32603, "message": str(e)}}
-                    write_message(json.dumps(error))
 
 
 @app.command()

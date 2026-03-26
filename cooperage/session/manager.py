@@ -1,6 +1,8 @@
+import json
 import logging
 import threading
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from cooperage.core.config import settings
 from cooperage.core.models import ContainerInfo, Session, ServerDef
@@ -17,6 +19,33 @@ _containers: dict[str, dict[str, ContainerInfo]] = {}
 _lock = threading.Lock()
 
 
+# ── File persistence ──────────────────────────────────────────────────────────
+
+def _sessions_path() -> Path:
+    return settings.sessions_path
+
+
+def _save() -> None:
+    path = _sessions_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = [s.model_dump(mode="json") for s in _sessions.values()]
+    path.write_text(json.dumps(data, indent=2, default=str))
+
+
+def _load_from_file() -> None:
+    path = _sessions_path()
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text())
+        for entry in data:
+            session = Session(**entry)
+            _sessions[session.id] = session
+            _containers[session.id] = {}
+    except Exception as e:
+        logger.warning("Could not load sessions from %s: %s", path, e)
+
+
 # ── Session lifecycle ─────────────────────────────────────────────────────────
 
 def create_session(name: str | None = None) -> Session:
@@ -28,6 +57,7 @@ def create_session(name: str | None = None) -> Session:
     with _lock:
         _sessions[session.id] = session
         _containers[session.id] = {}
+        _save()
     logger.info("Created session %s (volume=%s)", session.id, session.volume_name)
     return session
 
@@ -38,8 +68,20 @@ def get_session(session_id: str) -> Session | None:
 
 
 def list_sessions() -> list[Session]:
+    """Return all active sessions, merging file state with in-memory state."""
+    path = _sessions_path()
+    if not path.exists():
+        with _lock:
+            return list(_sessions.values())
+    try:
+        data = json.loads(path.read_text())
+        file_sessions = {e["id"]: Session(**e) for e in data}
+    except Exception:
+        file_sessions = {}
     with _lock:
-        return list(_sessions.values())
+        # Merge: in-memory wins for sessions we own; file fills in sessions from other processes
+        merged = {**file_sessions, **_sessions}
+        return list(merged.values())
 
 
 def end_session(session_id: str) -> bool:
@@ -60,6 +102,16 @@ def end_session(session_id: str) -> bool:
         orch.remove_volume(session.volume_name)
     except Exception as e:
         logger.warning("Failed to remove volume %s: %s", session.volume_name, e)
+
+    # Remove from file too
+    path = _sessions_path()
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+            data = [e for e in data if e["id"] != session_id]
+            path.write_text(json.dumps(data, indent=2, default=str))
+        except Exception as e:
+            logger.warning("Could not update sessions file: %s", e)
 
     logger.info("Ended session %s", session_id)
     return True
@@ -87,9 +139,10 @@ def get_or_start_container(session_id: str, server_def: ServerDef) -> ContainerI
         )
 
     with _lock:
-        if session_id in _sessions:  # session might have expired during startup
+        if session_id in _sessions:
             _sessions[session_id].containers[server_def.name] = info.container_id
             _containers[session_id][server_def.name] = info
+            _save()
 
     return info
 
@@ -114,6 +167,7 @@ def _cleanup_loop() -> None:
 
 
 def start_cleanup_thread() -> None:
+    _load_from_file()
     t = threading.Thread(target=_cleanup_loop, daemon=True, name="cooperage-cleanup")
     t.start()
     logger.info("Session cleanup thread started (interval=%ds)", settings.session_cleanup_interval)
