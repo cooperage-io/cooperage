@@ -399,6 +399,10 @@ async def _proxy_call_tool(
     if content:
         texts = [c.get("text", "") for c in content if c.get("type") == "text"]
         return "\n".join(texts) if texts else result
+    # Empty content (e.g. FastMCP returns [] for empty list) — use structuredContent if present
+    structured = result.get("structuredContent", {}).get("result")
+    if structured is not None:
+        return json.dumps(structured)
     return result
 
 

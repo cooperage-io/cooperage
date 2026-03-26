@@ -69,10 +69,12 @@ def list_sessions() -> list[dict]:
 
 def workspace_list(session_id: str) -> list[str]:
     raw = call_tool("cooperage_workspace_list", {"session_id": session_id})
+    if not raw:
+        return []
     try:
         return json.loads(raw)
     except Exception:
-        return []
+        return [f for f in raw.strip().split("\n") if f]
 
 
 def workspace_read(session_id: str, path: str) -> str:

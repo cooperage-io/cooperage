@@ -75,7 +75,31 @@ def create_session(name: str | None = None) -> Session:
 
 def get_session(session_id: str) -> Session | None:
     with _lock:
-        return _sessions.get(session_id)
+        session = _sessions.get(session_id)
+        if session is not None:
+            return session
+
+    # Not in memory — check file (session may have been created by another gateway process)
+    path = _sessions_path()
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        for entry in data:
+            if entry["id"] == session_id:
+                container_data = {k: v for k, v in entry.items() if k == "_containers"}
+                containers = {
+                    name: ContainerInfo(**info)
+                    for name, info in entry.get("_containers", {}).items()
+                }
+                session = Session(**{k: v for k, v in entry.items() if k != "_containers"})
+                with _lock:
+                    _sessions[session.id] = session
+                    _containers[session.id] = containers
+                return session
+    except Exception as e:
+        logger.warning("Could not load session %s from file: %s", session_id, e)
+    return None
 
 
 def list_sessions() -> list[Session]:
@@ -131,10 +155,10 @@ def end_session(session_id: str) -> bool:
 # ── Container management within a session ────────────────────────────────────
 
 def get_or_start_container(session_id: str, server_def: ServerDef) -> ContainerInfo:
+    session = get_session(session_id)  # also loads from file if needed
+    if session is None:
+        raise ValueError(f"Session {session_id!r} not found")
     with _lock:
-        session = _sessions.get(session_id)
-        if session is None:
-            raise ValueError(f"Session {session_id!r} not found")
         existing = _containers[session_id].get(server_def.name)
 
     if existing is not None:
