@@ -181,6 +181,36 @@ cooperage register \
 
 ---
 
+## How does this compare to Docker MCP Toolkit?
+
+Docker MCP Toolkit (Docker Desktop 4.62+) is a UI for running containerized MCP servers locally. It's great for individual developers who want to connect off-the-shelf tools (GitHub, Puppeteer, etc.) to Claude Desktop with zero setup.
+
+Cooperage targets a different problem: **multi-step agentic pipelines that need stateful, shared compute across multiple specialized servers.**
+
+| | Docker MCP Toolkit | Cooperage |
+|-|-------------------|-----------|
+| **Shared workspace across servers** | No — each server is isolated | Yes — all servers in a session share `/workspace` |
+| **Session model** | Stateless | Explicit sessions with configurable TTL |
+| **Orchestration target** | Local Docker Desktop only | Docker or Kubernetes (swappable backend) |
+| **Image source** | Docker's curated catalog | Any registry — public, private, or on-prem |
+| **Target user** | Developer wanting off-the-shelf tools | Engineering org running custom simulation or data environments |
+
+**The key feature Docker MCP Toolkit doesn't have:**
+
+```
+cooperage_call_tool(session_id, "simulator", "generate_scene", {scene_type: "urban"})
+  → container A writes /workspace/scene.png
+
+cooperage_call_tool(session_id, "analysis", "run_script", {script: "..."})
+  → container B reads /workspace/scene.png from the same volume
+```
+
+Two containers. One session. One shared volume. This is what enables LLM-orchestrated multi-stage pipelines — a generator, an analyzer, a report writer — each in its own isolated environment, all passing data through the workspace. Docker's toolkit has no equivalent.
+
+If your team has proprietary simulation tools already packaged as Docker images, Cooperage is the layer that lets an LLM orchestrate them at scale — on your own infrastructure, with your own registry, on Kubernetes.
+
+---
+
 ## Running tests
 
 ```bash
