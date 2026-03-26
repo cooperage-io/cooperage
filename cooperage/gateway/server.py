@@ -190,6 +190,22 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="cooperage_run_bash",
+            description=(
+                "Execute a bash script in the session's compute container. "
+                "The /workspace directory is available as $WORKSPACE. "
+                "Useful for file manipulation, running CLI tools, or chaining commands."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "script": {"type": "string", "description": "Bash script to execute"},
+                },
+                "required": ["session_id", "script"],
+            },
+        ),
+        types.Tool(
             name="cooperage_run_script",
             description=(
                 "Execute a Python script in the session's compute container. "
@@ -252,6 +268,8 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
         return await _workspace_op(args["session_id"], "workspace_list", {})
     if name == "cooperage_run_script":
         return await _proxy_call_tool(args["session_id"], _COMPUTE_SERVER_NAME, "run_script", {"script": args["script"]})
+    if name == "cooperage_run_bash":
+        return await _proxy_call_tool(args["session_id"], _COMPUTE_SERVER_NAME, "run_bash", {"script": args["script"]})
     raise ValueError(f"Unknown tool: {name!r}")
 
 

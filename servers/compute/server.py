@@ -12,6 +12,7 @@ Tools:
 import io
 import os
 import contextlib
+import subprocess
 import traceback
 from pathlib import Path
 
@@ -49,6 +50,26 @@ def run_script(script: str) -> str:
         parts.append(f"stdout:\n{out}")
     if err:
         parts.append(f"stderr:\n{err}")
+    return "\n".join(parts) if parts else "(no output)"
+
+
+@mcp.tool()
+def run_bash(script: str) -> str:
+    """Execute a bash script in the compute container. The /workspace directory
+    is available at $WORKSPACE. stdout and stderr are captured and returned."""
+    result = subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "WORKSPACE": str(WORKSPACE)},
+    )
+    parts = []
+    if result.stdout:
+        parts.append(f"stdout:\n{result.stdout}")
+    if result.stderr:
+        parts.append(f"stderr:\n{result.stderr}")
+    if result.returncode != 0:
+        parts.append(f"exit code: {result.returncode}")
     return "\n".join(parts) if parts else "(no output)"
 
 
