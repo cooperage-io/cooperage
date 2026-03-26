@@ -212,6 +212,7 @@ Cap CPU and memory per container at registration time so one tenant can't starve
 
 ## Later / Backlog
 
+- **Publish images to a registry** — publish `cooperage-workspace:latest` (and example server images) to Docker Hub / ghcr.io; update `_WORKSPACE_IMAGE` in the gateway to use the full registry URL so `pip install cooperage` works without a manual image build
 - **Fly.io / Railway backend** — alternative to K8s for simpler cloud deploys
 - **`cooperage_list_sessions` tool** — expose active sessions to the LLM
 - **Resource usage telemetry** — track CPU/memory per session, expose via gateway tool
