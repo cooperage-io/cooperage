@@ -118,33 +118,52 @@ def start(
 
 
 async def _run_proxy(gateway_url: str) -> None:
-    """Bridge stdio ↔ SSE gateway. Claude Desktop speaks stdio; this forwards to HTTP."""
+    """Bridge stdio ↔ SSE gateway using MCP's Content-Length framing (LSP-style)."""
     import sys
+    import json
     import httpx
 
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
-    async def handle(line: str) -> None:
-        try:
-            resp = await client.post(gateway_url, content=line, headers=headers)
-            resp.raise_for_status()
-            sys.stdout.write(resp.text + "\n")
-            sys.stdout.flush()
-        except Exception as e:
-            import json
-            error = {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": str(e)}}
-            sys.stdout.write(json.dumps(error) + "\n")
-            sys.stdout.flush()
+    def read_message() -> str | None:
+        """Read one Content-Length framed message from stdin."""
+        content_length = None
+        while True:
+            header = sys.stdin.readline()
+            if not header:
+                return None
+            header = header.strip()
+            if not header:
+                break  # blank line = end of headers
+            if header.lower().startswith("content-length:"):
+                content_length = int(header.split(":", 1)[1].strip())
+        if content_length is None:
+            return None
+        return sys.stdin.read(content_length)
+
+    def write_message(body: str) -> None:
+        """Write one Content-Length framed message to stdout."""
+        encoded = body.encode("utf-8")
+        sys.stdout.write(f"Content-Length: {len(encoded)}\r\n\r\n")
+        sys.stdout.write(body)
+        sys.stdout.flush()
 
     async with httpx.AsyncClient(timeout=120) as client:
         loop = asyncio.get_event_loop()
         while True:
-            line = await loop.run_in_executor(None, sys.stdin.readline)
-            if not line:
+            body = await loop.run_in_executor(None, read_message)
+            if body is None:
                 break
-            line = line.strip()
-            if line:
-                asyncio.create_task(handle(line))
+            body = body.strip()
+            if not body:
+                continue
+            try:
+                resp = await client.post(gateway_url, content=body, headers=headers)
+                resp.raise_for_status()
+                write_message(resp.text)
+            except Exception as e:
+                error = {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": str(e)}}
+                write_message(json.dumps(error))
 
 
 @app.command()
