@@ -96,6 +96,41 @@ The LLM sees these tools:
 
 ---
 
+## Kubernetes backend
+
+Cooperage ships with a Kubernetes orchestrator backend that is a drop-in replacement for the default Docker backend. Containers run as Pods with NodePort Services; the shared workspace is a `hostPath` volume (works on Docker Desktop K8s out of the box; use a PVC with a ReadWriteMany StorageClass for multi-node clusters).
+
+### Setup
+
+**1. Enable Kubernetes in Docker Desktop** — Settings → Kubernetes → Enable Kubernetes.
+
+**2. Bootstrap the namespace:**
+```bash
+COOPERAGE_ORCHESTRATOR=kubernetes uv run cooperage init-k8s
+```
+
+**3. Start the gateway with the K8s backend:**
+```bash
+COOPERAGE_ORCHESTRATOR=kubernetes uv run cooperage start
+```
+
+Or add `COOPERAGE_ORCHESTRATOR=kubernetes` to `.env` to make it the default.
+
+**4. Verify pods and services during a session:**
+```bash
+kubectl get pods -n cooperage
+kubectl get svc -n cooperage
+```
+
+**5. Cleanup:**
+```bash
+kubectl delete namespace cooperage
+```
+
+The gateway tools and Claude Desktop config are identical — only the backend changes.
+
+---
+
 ## CLI reference
 
 ```
@@ -104,6 +139,7 @@ cooperage list-servers  List registered servers
 cooperage deregister    Remove a server from the registry
 cooperage sessions      List active sessions
 cooperage start         Start the gateway (stdio by default, --sse for HTTP)
+cooperage init-k8s      Bootstrap the Cooperage namespace in Kubernetes
 ```
 
 ---
@@ -116,8 +152,12 @@ See [`.env.example`](.env.example). Key settings:
 |----------|---------|-------------|
 | `COOPERAGE_SESSION_TTL_SECONDS` | `1800` | Session auto-expiry (30 min) |
 | `COOPERAGE_CONTAINER_STARTUP_TIMEOUT` | `30` | Seconds to wait for container readiness |
-| `COOPERAGE_CONTAINER_PORT_RANGE_START` | `9000` | Host port range for containers |
-| `COOPERAGE_CONTAINER_PORT_RANGE_END` | `9999` | Host port range for containers |
+| `COOPERAGE_CONTAINER_PORT_RANGE_START` | `9000` | Host port range for containers (Docker) |
+| `COOPERAGE_CONTAINER_PORT_RANGE_END` | `9999` | Host port range for containers (Docker) |
+| `COOPERAGE_ORCHESTRATOR` | `docker` | Orchestrator backend: `docker` or `kubernetes` |
+| `COOPERAGE_K8S_NAMESPACE` | `cooperage` | Kubernetes namespace |
+| `COOPERAGE_K8S_NODE_PORT_RANGE_START` | `30000` | NodePort range start (K8s) |
+| `COOPERAGE_K8S_NODE_PORT_RANGE_END` | `32767` | NodePort range end (K8s) |
 
 ---
 
@@ -147,4 +187,4 @@ cooperage register \
 uv run pytest -v
 ```
 
-55 tests, no Docker daemon required (all mocked).
+85 tests, no Docker daemon or cluster required (all mocked).
