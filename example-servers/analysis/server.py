@@ -4,9 +4,6 @@ Cooperage Example: Analysis MCP Server
 Demonstrates stateful compute using a shared /workspace volume.
 Tools:
   run_script     — execute a Python snippet, capture stdout/stderr
-  write_file     — write a file to /workspace
-  read_file      — read a file from /workspace
-
 """
 
 import io
@@ -45,24 +42,6 @@ def run_script(script: str) -> str:
     if err:
         parts.append(f"stderr:\n{err}")
     return "\n".join(parts) if parts else "(no output)"
-
-
-@mcp.tool()
-def write_file(filename: str, content: str) -> str:
-    """Write content to a file in /workspace."""
-    path = WORKSPACE / filename
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-    return f"Written {filename}"
-
-
-@mcp.tool()
-def read_file(filename: str) -> str:
-    """Read a file from /workspace."""
-    path = WORKSPACE / filename
-    if not path.exists():
-        return f"File not found: {filename}"
-    return path.read_text()
 
 
 if __name__ == "__main__":
