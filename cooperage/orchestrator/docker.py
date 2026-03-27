@@ -121,6 +121,18 @@ def start_container(server_def: ServerDef, session: Session) -> ContainerInfo:
     return info
 
 
+def get_container_logs(container_id: str, tail: int = 50) -> str:
+    """Return the last N lines of container stdout+stderr."""
+    client = get_client()
+    try:
+        container = client.containers.get(container_id)
+        return container.logs(tail=tail, timestamps=False).decode("utf-8", errors="replace").strip()
+    except docker.errors.NotFound:
+        return "(container not found)"
+    except Exception as e:
+        return f"(could not fetch logs: {e})"
+
+
 def stop_container(container_id: str) -> None:
     client = get_client()
     try:

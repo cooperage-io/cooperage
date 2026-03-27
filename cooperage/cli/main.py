@@ -5,7 +5,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-app = typer.Typer(name="cooperage", help="Ephemeral MCP container orchestration.")
+app = typer.Typer(name="cooperage", help="Where AI tools work together.")
 console = Console()
 
 logging.basicConfig(level=logging.WARNING)
@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.WARNING)
 @app.command()
 def register(
     name: str = typer.Option(..., help="Short name for this server"),
-    image: str = typer.Option(..., help="Docker image (e.g. cooperage-analysis:latest)"),
+    image: str = typer.Option(..., help="Docker image (e.g. cooperage-image-analyzer:latest)"),
     description: str = typer.Option("", help="Human-readable description"),
     port: int = typer.Option(8000, help="Port the MCP server listens on inside the container"),
     env: list[str] = typer.Option([], help="Environment variables in KEY=VALUE format"),
@@ -127,6 +127,40 @@ def ui(
         sys.executable, "-m", "streamlit", "run", str(ui_app),
         "--", f"--gateway={gateway}",
     ])
+
+
+@app.command()
+def clear(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """Stop all cooperage containers and clear session state. Use before a demo."""
+    import subprocess
+    from cooperage.core.config import settings
+
+    if not yes:
+        typer.confirm("Stop all cooperage containers and clear sessions?", abort=True)
+
+    # Stop all cooperage containers
+    result = subprocess.run(
+        ["docker", "ps", "--format", "{{.Names}}"],
+        capture_output=True, text=True,
+    )
+    containers = [n for n in result.stdout.splitlines() if n.startswith("cooperage-")]
+    if containers:
+        subprocess.run(["docker", "stop"] + containers, capture_output=True)
+        console.print(f"[yellow]Stopped[/] {len(containers)} container(s): {', '.join(containers)}")
+    else:
+        console.print("[dim]No running cooperage containers.[/]")
+
+    # Clear sessions file
+    path = settings.sessions_path
+    if path.exists():
+        path.unlink()
+        console.print(f"[yellow]Cleared[/] {path}")
+    else:
+        console.print("[dim]No sessions file to clear.[/]")
+
+    console.print("[green]Ready.[/] Restart the gateway to begin a fresh session.")
 
 
 @app.command(name="init-k8s")

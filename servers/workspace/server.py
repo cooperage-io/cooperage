@@ -11,7 +11,10 @@ Tools:
   workspace_delete  — delete a file from /workspace
 """
 
+import base64
+import io
 import json
+import mimetypes
 import os
 from pathlib import Path
 
@@ -22,6 +25,11 @@ WORKSPACE = Path(os.environ.get("COOPERAGE_WORKSPACE", "/workspace"))
 WORKSPACE.mkdir(parents=True, exist_ok=True)
 
 mcp = FastMCP("cooperage-workspace", json_response=True, stateless_http=True)
+
+_BINARY_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif",
+    ".pdf", ".zip", ".gz", ".tar", ".bin",
+}
 
 
 def _safe_path(filename: str) -> Path:
@@ -42,12 +50,38 @@ def workspace_write(path: str, content: str) -> str:
 
 
 @mcp.tool()
-def workspace_read(path: str) -> str:
-    """Read a file from /workspace. Returns the file contents as text."""
+def workspace_read(path: str, max_size: int = 32) -> str:
+    """Read a file from /workspace. Text files are returned as-is. Binary files
+    (images, PDFs, etc.) are returned as a JSON object:
+    {"type":"binary","mime":"image/png","encoding":"base64","data":"..."}
+    For images, set max_size (e.g. 256) to resize the longest edge before encoding —
+    keeps the result small enough to embed in HTML without hitting size limits."""
     p = _safe_path(path)
     if not p.exists():
         raise FileNotFoundError(f"{path!r} not found in workspace")
-    return p.read_text(encoding="utf-8")
+    if p.suffix.lower() in _BINARY_EXTENSIONS:
+        mime, _ = mimetypes.guess_type(str(p))
+        data = p.read_bytes()
+        if max_size > 0 and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif"}:
+            try:
+                from PIL import Image as _Image
+                img = _Image.open(io.BytesIO(data))
+                img.thumbnail((max_size, max_size))
+                buf = io.BytesIO()
+                img.save(buf, format=img.format or "PNG")
+                data = buf.getvalue()
+            except Exception:
+                pass
+        return json.dumps({
+            "type": "binary",
+            "mime": mime or "application/octet-stream",
+            "encoding": "base64",
+            "data": base64.b64encode(data).decode("ascii"),
+        })
+    text = p.read_text(encoding="utf-8")
+    if len(text) > 200_000:
+        return text[:200_000] + f"\n...[truncated — {len(text)} total chars. Read in chunks or use a script to process.]"
+    return text
 
 
 @mcp.tool()

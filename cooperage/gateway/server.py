@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 
 app = Server("cooperage-gateway")
 
+# Tracks server names that are currently warming up, keyed by session_id.
+_warming: dict[str, set[str]] = {}
+
 # ── Built-in servers ──────────────────────────────────────────────────────────
 
 _WORKSPACE_SERVER_NAME = "__workspace__"
@@ -74,7 +77,13 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="cooperage_list_servers",
-            description="List all MCP servers registered with Cooperage.",
+            description=(
+                "Discover what specialized servers are available in this Cooperage deployment. "
+                "Always call this first — registered servers may already provide domain-specific "
+                "tools (e.g. simulators, analyzers, data pipelines) that are faster and more "
+                "capable than writing a general script. "
+                "After listing, pull the servers you plan to use with cooperage_pull_server."
+            ),
             inputSchema={"type": "object", "properties": {}, "required": []},
         ),
         types.Tool(
@@ -85,9 +94,9 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="cooperage_pull_server",
             description=(
-                "Pre-pull a server's Docker image so the first cooperage_call_tool "
-                "starts instantly. Call this before creating a session when startup "
-                "latency matters."
+                "Pre-pull a server's Docker image. Only needed if the image is not yet "
+                "cached locally (check the 'cached' field from cooperage_list_servers). "
+                "Skip this if cached=true — the session pre-warms containers automatically."
             ),
             inputSchema={
                 "type": "object",
@@ -175,12 +184,18 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="cooperage_workspace_read",
-            description="Read a file from the session's /workspace volume.",
+            description=(
+                "Read a file from the session's /workspace volume. "
+                "Binary files (images, etc.) are returned as base64-encoded JSON. "
+                "When embedding images in HTML, always set max_size=64 to get a thumbnail — "
+                "this keeps the base64 small enough to embed without hitting size limits."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "session_id": {"type": "string"},
                     "path": {"type": "string", "description": "File path relative to /workspace"},
+                    "max_size": {"type": "integer", "description": "For images: resize longest edge to this many pixels before returning. Use 64 when embedding in HTML. Omit for full resolution."},
                 },
                 "required": ["session_id", "path"],
             },
@@ -199,7 +214,11 @@ async def list_tools() -> list[types.Tool]:
             description=(
                 "Execute a bash script in the session's compute container. "
                 "The /workspace directory is available as $WORKSPACE. "
-                "Useful for file manipulation, running CLI tools, or chaining commands."
+                "Useful for file manipulation, running CLI tools, or chaining commands. "
+                "Do NOT use this to read files from /workspace — use cooperage_workspace_read "
+                "instead (handles binary files and base64 encoding automatically). "
+                "Do NOT use this for domain-specific work like image analysis — "
+                "use cooperage_call_tool with a registered server instead."
             ),
             inputSchema={
                 "type": "object",
@@ -214,11 +233,14 @@ async def list_tools() -> list[types.Tool]:
             name="cooperage_run_script",
             description=(
                 "Execute a Python script in the session's compute container. "
-                "The /workspace directory is available as the 'workspace' variable — "
-                "read inputs from it and write results back. "
-                "numpy, pandas, scipy, matplotlib, and scikit-learn are pre-installed. "
-                "To install additional packages, call: "
-                "import subprocess; subprocess.run(['uv', 'pip', 'install', '<pkg>'], check=True)"
+                "Good for general computation, data wrangling, and post-processing. "
+                "Before using this for domain-specific work (generating data, running simulations, "
+                "specialized analysis), check cooperage_list_servers — a registered server may "
+                "already do it better. "
+                "Do NOT use this to read or base64-encode image files — use cooperage_workspace_read "
+                "with max_size=64 instead. "
+                "Keep stdout minimal — only print short confirmation messages, never large data. "
+                "Write large results to /workspace files; do not print them to stdout."
             ),
             inputSchema={
                 "type": "object",
@@ -270,7 +292,10 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
             "path": args["path"], "content": args["content"],
         })
     if name == "cooperage_workspace_read":
-        return await _workspace_op(args["session_id"], "workspace_read", {"path": args["path"]})
+        op_args = {"path": args["path"]}
+        if "max_size" in args:
+            op_args["max_size"] = args["max_size"]
+        return await _workspace_op(args["session_id"], "workspace_read", op_args)
     if name == "cooperage_workspace_list":
         return await _workspace_op(args["session_id"], "workspace_list", {})
     if name == "cooperage_run_script":
@@ -285,12 +310,22 @@ def _list_sessions() -> list[dict]:
     result = []
     for s in all_sessions:
         containers = []
+        started = set(s.containers.keys())
         for server_name, container_id in s.containers.items():
             containers.append({
                 "server_name": server_name,
                 "container_id": container_id,
                 "builtin": server_name in _BUILTIN_SERVER_NAMES,
+                "status": "ready",
             })
+        for server_name in _warming.get(s.id, set()):
+            if server_name not in started:
+                containers.append({
+                    "server_name": server_name,
+                    "container_id": None,
+                    "builtin": server_name in _BUILTIN_SERVER_NAMES,
+                    "status": "warming",
+                })
         result.append({
             "session_id": s.id,
             "name": s.name,
@@ -325,8 +360,10 @@ async def _pull_server(server_name: str) -> dict:
 
 async def _create_session(name: str | None) -> dict:
     session = sessions.create_session(name=name)
-    asyncio.create_task(_warmup_builtin(session.id, _WORKSPACE_SERVER_DEF))
-    asyncio.create_task(_warmup_builtin(session.id, _COMPUTE_SERVER_DEF))
+    servers_to_warm = [_WORKSPACE_SERVER_DEF, _COMPUTE_SERVER_DEF]
+    _warming[session.id] = {s.name for s in servers_to_warm}
+    for server_def in servers_to_warm:
+        asyncio.create_task(_warmup_builtin(session.id, server_def))
     return {
         "session_id": session.id,
         "name": session.name,
@@ -341,6 +378,10 @@ async def _warmup_builtin(session_id: str, server_def: ServerDef) -> None:
         logger.info("%s container ready for session %s", server_def.name, session_id[:8])
     except Exception as e:
         logger.warning("%s pre-warm failed for session %s: %s", server_def.name, session_id[:8], e)
+    finally:
+        _warming.get(session_id, set()).discard(server_def.name)
+        if session_id in _warming and not _warming[session_id]:
+            del _warming[session_id]
 
 
 def _end_session(session_id: str) -> dict:

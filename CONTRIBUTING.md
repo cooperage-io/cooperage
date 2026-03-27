@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-git clone https://github.com/EvanLavizadeh/cooperage
+git clone https://github.com/cooperage-io/cooperage
 cd cooperage
 uv sync
 ```
@@ -36,8 +36,8 @@ cooperage/          # core package
 servers/
   workspace/        # built-in workspace server (auto-registered by gateway)
 example-servers/
-  analysis/         # example: run Python scripts
-  simulator/        # example: generate synthetic imagery
+  image-analyzer/            # example: analyze images with numpy/PIL
+  synthetic-image-generator/ # example: generate synthetic satellite imagery
 tests/
 ```
 

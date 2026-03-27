@@ -26,10 +26,10 @@ def test_pull_image_returns_id(mock_get_client):
     mock_get_client.return_value = mock_client
 
     from cooperage.orchestrator.docker import pull_image
-    result = pull_image("cooperage-analysis:latest")
+    result = pull_image("cooperage-image-analyzer:latest")
 
     assert result == "sha256:abc123def456"
-    mock_client.images.pull.assert_called_once_with("cooperage-analysis:latest")
+    mock_client.images.pull.assert_called_once_with("cooperage-image-analyzer:latest")
 
 
 @patch("cooperage.orchestrator.docker.get_client")
@@ -38,8 +38,8 @@ def test_image_exists_true(mock_get_client):
     mock_get_client.return_value = mock_client
 
     from cooperage.orchestrator.docker import image_exists
-    assert image_exists("cooperage-analysis:latest") is True
-    mock_client.images.get.assert_called_once_with("cooperage-analysis:latest")
+    assert image_exists("cooperage-image-analyzer:latest") is True
+    mock_client.images.get.assert_called_once_with("cooperage-image-analyzer:latest")
 
 
 @patch("cooperage.orchestrator.docker.get_client")

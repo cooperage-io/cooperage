@@ -38,9 +38,9 @@ def test_pull_image_spawns_and_deletes_pull_pod(mock_mono, _mock_sleep, mock_get
     core_api.read_namespaced_pod.return_value = pod_status
 
     from cooperage.orchestrator.kubernetes import pull_image
-    result = pull_image("cooperage-analysis:latest")
+    result = pull_image("cooperage-image-analyzer:latest")
 
-    assert result == "cooperage-analysis:latest"
+    assert result == "cooperage-image-analyzer:latest"
     core_api.create_namespaced_pod.assert_called_once()
     core_api.delete_namespaced_pod.assert_called()
 
@@ -61,7 +61,7 @@ def test_pull_image_still_cleans_up_on_failed_pod(mock_mono, _mock_sleep, mock_g
     core_api.read_namespaced_pod.return_value = pod_status
 
     from cooperage.orchestrator.kubernetes import pull_image
-    pull_image("cooperage-analysis:latest")  # should not raise
+    pull_image("cooperage-image-analyzer:latest")  # should not raise
 
     core_api.delete_namespaced_pod.assert_called()
 
@@ -142,7 +142,7 @@ def test_start_container_creates_pod_and_service(mock_get_client, _mock_port):
     mock_get_client.return_value = client
 
     session = _make_session()
-    server_def = ServerDef(name="analysis", image="analysis:latest", port=8000)
+    server_def = ServerDef(name="image-analyzer", image="image-analyzer:latest", port=8000)
 
     from cooperage.orchestrator.kubernetes import start_container
     start_container(server_def, session)

@@ -5,5 +5,13 @@ __pycache__/
 .env
 *.egg-info/
 dist/
+build/
 .DS_Store
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.log
+.claude/settings.local.json
+donot-commit/

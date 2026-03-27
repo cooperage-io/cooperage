@@ -1,6 +1,6 @@
 # Cooperage
 
-**Ephemeral container orchestration for MCP servers.**
+**Where AI tools work together.**
 
 MCP makes it easy to give LLMs tools. Cooperage makes those tools scalable — each tool call runs in an isolated Docker container with dedicated compute and a shared workspace volume. Spin up, run, tear down. No infra to manage.
 
@@ -43,16 +43,16 @@ uv sync
 ### 2. Build the example server
 
 ```bash
-docker buildx build --load -t cooperage-analysis:latest example-servers/analysis/
+docker buildx build --load -t cooperage-image-analyzer:latest example-servers/image-analyzer/
 ```
 
 ### 3. Register it
 
 ```bash
 uv run cooperage register \
-  --name analysis \
-  --image cooperage-analysis:latest \
-  --description "Run Python scripts with numpy/pandas, persist results to /workspace"
+  --name image-analyzer \
+  --image cooperage-image-analyzer:latest \
+  --description "Analyze images and data in /workspace using numpy/PIL"
 ```
 
 ### 4. Add to Claude Desktop
@@ -75,9 +75,9 @@ Restart Claude Desktop. You'll see a hammer icon — Cooperage is connected.
 ### 5. Pre-warm (recommended before first use)
 
 In Claude Desktop, ask:
-> *"Pull the analysis server so it's ready to use."*
+> *"Pull the image-analyzer server so it's ready to use."*
 
-Claude will call `cooperage_pull_server("analysis")` to ensure the image is cached locally.
+Claude will call `cooperage_pull_server("image-analyzer")` to ensure the image is cached locally.
 
 ---
 
@@ -169,7 +169,7 @@ Package any MCP server as a Docker image. Requirements:
 2. Use `StreamableHTTPSessionManager` with `json_response=True, stateless=True` so the gateway can POST to `/mcp`
 3. Optionally read/write `/workspace` — it's a shared volume across your session
 
-See [`example-servers/analysis/`](example-servers/analysis/) for a working example.
+See [`example-servers/image-analyzer/`](example-servers/image-analyzer/) for a working example.
 
 ```bash
 cooperage register \
@@ -200,10 +200,10 @@ There are a handful of platforms that touch this space. Here's an honest read on
 No other platform runs multiple MCP server containers within the same session and mounts them to a shared volume. AWS AgentCore is closest — it has per-session filesystem storage — but it colocates all tools inside a single container, runs only on AWS, and the feature is in preview with a 1 GB cap. Every cloud platform (Azure, Google, Composio) treats MCP servers as remote HTTP endpoints; container lifecycle is not their problem.
 
 ```
-cooperage_call_tool(session_id, "simulator", "generate_scene", {scene_type: "urban"})
+cooperage_call_tool(session_id, "synthetic-image-generator", "generate_scene", {scene_type: "urban"})
   → container A starts, writes /workspace/scene.png
 
-cooperage_call_tool(session_id, "analysis", "run_script", {script: "..."})
+cooperage_call_tool(session_id, "image-analyzer", "analyze_scene", {image_path: "scene.png"})
   → container B starts, reads /workspace/scene.png from the same volume
 ```
 

@@ -2,7 +2,7 @@
 Cooperage Example: Imagery Simulator MCP Server
 
 Generates synthetic satellite imagery and writes it to /workspace.
-A second container (e.g. cooperage-analysis) can then read and process the
+A second container (e.g. cooperage-image-analyzer) can then read and process the
 same /workspace volume within the same Cooperage session.
 
 Tools:
@@ -24,7 +24,7 @@ from mcp.types import TextContent
 WORKSPACE = Path(os.environ.get("COOPERAGE_WORKSPACE", "/workspace"))
 WORKSPACE.mkdir(parents=True, exist_ok=True)
 
-mcp = FastMCP("cooperage-simulator", json_response=True, stateless_http=True)
+mcp = FastMCP("synthetic-image-generator", json_response=True, stateless_http=True)
 
 
 # ── Scene generators ──────────────────────────────────────────────────────────
@@ -100,9 +100,10 @@ _GENERATORS = {
 
 def _generate_scene(
     scene_type: str,
-    width: int,
-    height: int,
+    width: int = 256,
+    height: int = 256,
     seed: int | None = None,
+    output_path: str = "scene.png",
 ) -> dict:
     """Generate a scene and write files; return the metadata dict."""
     if scene_type not in _GENERATORS:
@@ -111,8 +112,11 @@ def _generate_scene(
     rng = np.random.default_rng(seed)
     pixels = _GENERATORS[scene_type](width, height, rng)
 
-    Image.fromarray(pixels, mode="RGB").save(WORKSPACE / "scene.png")
+    img_path = WORKSPACE / output_path
+    img_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(pixels, mode="RGB").save(img_path)
 
+    meta_path = img_path.with_suffix(".json")
     stats = {
         "mean_r": round(float(pixels[:, :, 0].mean()), 2),
         "mean_g": round(float(pixels[:, :, 1].mean()), 2),
@@ -127,10 +131,10 @@ def _generate_scene(
         "width": width,
         "height": height,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "files": {"image": "scene.png", "metadata": "scene_meta.json"},
+        "files": {"image": output_path, "metadata": str(meta_path.relative_to(WORKSPACE))},
         "stats": stats,
     }
-    (WORKSPACE / "scene_meta.json").write_text(json.dumps(meta, indent=2))
+    meta_path.write_text(json.dumps(meta, indent=2))
     return meta
 
 
@@ -142,6 +146,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             width=int(arguments.get("width", 512)),
             height=int(arguments.get("height", 512)),
             seed=arguments.get("seed"),
+            output_path=arguments.get("output_path", "scene.png"),
         )
         return [TextContent(type="text", text=json.dumps(meta, indent=2))]
 
@@ -156,16 +161,36 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 # ── MCP tools ─────────────────────────────────────────────────────────────────
 
 @mcp.tool()
+def generate_all_scenes(
+    width: int = 256,
+    height: int = 256,
+    seed: int | None = None,
+    output_dir: str = "scenes",
+) -> str:
+    """Generate all three scene types (terrain, urban, coastal) in one call.
+    Saves each to {output_dir}/{scene_type}.png in /workspace.
+    Use this instead of calling generate_scene three times."""
+    results = {}
+    for scene_type in ("terrain", "urban", "coastal"):
+        output_path = f"{output_dir}/{scene_type}.png"
+        results[scene_type] = _generate_scene(scene_type, width, height, seed, output_path)
+    return json.dumps(results, indent=2)
+
+
+@mcp.tool()
 def generate_scene(
     scene_type: Literal["terrain", "urban", "coastal"],
-    width: int = 512,
-    height: int = 512,
+    width: int = 256,
+    height: int = 256,
     seed: int | None = None,
+    output_path: str = "scene.png",
 ) -> str:
     """Generate synthetic satellite imagery and save it to /workspace.
     Returns image stats and file paths.
+    Use output_path to save to a specific location (e.g. 'scenes/terrain.png')
+    so multiple scenes can coexist without overwriting each other.
     Other Cooperage servers in the same session can read the output from /workspace."""
-    meta = _generate_scene(scene_type, width, height, seed)
+    meta = _generate_scene(scene_type, width, height, seed, output_path)
     return json.dumps(meta, indent=2)
 
 

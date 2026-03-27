@@ -16,12 +16,12 @@ services:
       - COOPERAGE_CONTAINER_PORT_RANGE_END=${COOPERAGE_CONTAINER_PORT_RANGE_END:-9999}
     restart: unless-stopped
 
-  # Build the example analysis server image so it's available locally
-  analysis-builder:
+  # Build the example image-analyzer server image so it's available locally
+  image-analyzer-builder:
     build:
-      context: ./example-servers/analysis
+      context: ./example-servers/image-analyzer
       dockerfile: Dockerfile
-    image: cooperage-analysis:latest
+    image: cooperage-image-analyzer:latest
     # Only build, don't run
     command: echo "built"
     profiles:

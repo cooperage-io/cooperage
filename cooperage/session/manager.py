@@ -103,18 +103,23 @@ def get_session(session_id: str) -> Session | None:
 
 
 def list_sessions() -> list[Session]:
-    """Return all active sessions, merging file state with in-memory state."""
+    """Return all active sessions. File is authoritative for deletions — sessions
+    removed by another process (e.g. stdio gateway) are evicted from memory here."""
     path = _sessions_path()
-    if not path.exists():
-        with _lock:
-            return list(_sessions.values())
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text()) if path.exists() else []
+        file_ids = {e["id"] for e in data}
         file_sessions = {e["id"]: Session(**e) for e in data}
     except Exception:
+        file_ids = None
         file_sessions = {}
     with _lock:
-        # Merge: in-memory wins for sessions we own; file fills in sessions from other processes
+        # Evict in-memory sessions that were deleted by another process
+        if file_ids is not None:
+            for sid in list(_sessions.keys()):
+                if sid not in file_ids:
+                    _sessions.pop(sid, None)
+                    _containers.pop(sid, None)
         merged = {**file_sessions, **_sessions}
         return list(merged.values())
 
@@ -167,10 +172,12 @@ def get_or_start_container(session_id: str, server_def: ServerDef) -> ContainerI
     info = orch.start_container(server_def, session)
     ready = orch.wait_until_ready(info)
     if not ready:
+        logs = orch.get_container_logs(info.container_id)
         orch.stop_container(info.container_id)
         raise RuntimeError(
-            f"Container for server {server_def.name!r} did not become ready "
-            f"within {settings.container_startup_timeout}s"
+            f"Container for server {server_def.name!r} failed to start "
+            f"within {settings.container_startup_timeout}s.\n"
+            f"Container logs:\n{logs}"
         )
 
     with _lock:
