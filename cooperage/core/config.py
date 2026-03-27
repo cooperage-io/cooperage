@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     docker_socket: str = "unix:///var/run/docker.sock"
     container_port_range_start: int = 9000
     container_port_range_end: int = 9999
-    container_startup_timeout: int = 30  # seconds
+    container_startup_timeout: int = 60  # seconds
 
     # Sessions
     session_ttl_seconds: int = 1800  # 30 minutes

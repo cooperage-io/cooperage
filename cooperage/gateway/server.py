@@ -360,7 +360,9 @@ async def _pull_server(server_name: str) -> dict:
 
 async def _create_session(name: str | None) -> dict:
     session = sessions.create_session(name=name)
-    servers_to_warm = [_WORKSPACE_SERVER_DEF, _COMPUTE_SERVER_DEF]
+    servers_to_warm = [_WORKSPACE_SERVER_DEF, _COMPUTE_SERVER_DEF] + [
+        s for s in registry.load() if s.name not in _BUILTIN_SERVER_NAMES
+    ]
     _warming[session.id] = {s.name for s in servers_to_warm}
     for server_def in servers_to_warm:
         asyncio.create_task(_warmup_builtin(session.id, server_def))
