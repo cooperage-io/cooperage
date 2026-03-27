@@ -449,6 +449,60 @@ async def _proxy_call_tool(
     return result
 
 
+# ── Upload endpoint ───────────────────────────────────────────────────────────
+
+async def _send_json_response(send, status: int, body: dict) -> None:
+    import json as _json
+    body_bytes = _json.dumps(body).encode()
+    await send({
+        "type": "http.response.start",
+        "status": status,
+        "headers": [
+            [b"content-type", b"application/json"],
+            [b"content-length", str(len(body_bytes)).encode()],
+            [b"access-control-allow-origin", b"*"],
+        ],
+    })
+    await send({"type": "http.response.body", "body": body_bytes})
+
+
+async def _handle_upload(scope, receive, send) -> None:
+    """Handle POST /upload/{session_id}?path=<workspace_path> with raw bytes body."""
+    import base64
+    from urllib.parse import parse_qs, unquote
+
+    path = scope.get("path", "")
+    parts = path.strip("/").split("/")
+    if len(parts) < 2 or not parts[1]:
+        await _send_json_response(send, 400, {"error": "Missing session_id in path"})
+        return
+
+    session_id = parts[1]
+
+    query_string = scope.get("query_string", b"").decode()
+    params = parse_qs(query_string)
+    file_path = params.get("path", [None])[0]
+    if not file_path:
+        await _send_json_response(send, 400, {"error": "Missing 'path' query parameter"})
+        return
+    file_path = unquote(file_path)
+
+    body = b""
+    more_body = True
+    while more_body:
+        event = await receive()
+        body += event.get("body", b"")
+        more_body = event.get("more_body", False)
+
+    encoded = base64.b64encode(body).decode("ascii")
+    try:
+        result = await _workspace_op(session_id, "workspace_write_binary", {"path": file_path, "data": encoded})
+        await _send_json_response(send, 200, {"ok": True, "path": file_path, "result": result})
+    except Exception as e:
+        logger.exception("Upload failed for session %s path %s", session_id, file_path)
+        await _send_json_response(send, 500, {"error": str(e)})
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def run_stdio() -> None:
@@ -484,6 +538,8 @@ async def run_sse(host: str | None = None, port: int | None = None) -> None:
                     await send({"type": "lifespan.startup.complete"})
                     await receive()
                     await send({"type": "lifespan.shutdown.complete"})
+            elif scope["type"] == "http" and scope.get("path", "").startswith("/upload/"):
+                await _handle_upload(scope, receive, send)
             else:
                 await session_manager.handle_request(scope, receive, send)
 

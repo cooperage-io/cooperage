@@ -91,6 +91,16 @@ def workspace_list() -> list[str]:
 
 
 @mcp.tool()
+def workspace_write_binary(path: str, data: str) -> str:
+    """Write a binary file to /workspace. data must be base64-encoded bytes. Creates parent directories as needed. Overwrites if the file exists."""
+    p = _safe_path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    raw = base64.b64decode(data)
+    p.write_bytes(raw)
+    return json.dumps({"written": path, "bytes": len(raw)})
+
+
+@mcp.tool()
 def workspace_delete(path: str) -> str:
     """Delete a file from /workspace."""
     p = _safe_path(path)

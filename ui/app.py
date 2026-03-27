@@ -170,6 +170,8 @@ def main_content() -> None:
                 st.info(f"🔵 **{c['server_name']}** `{c['container_id'][:12]}`")
         st.caption("🟢 Built-in  🔵 Add-on  ⏳ Warming")
 
+    gateway_base = GATEWAY_URL[:-4] if GATEWAY_URL.endswith("/mcp") else GATEWAY_URL.rstrip("/")
+
     with col_files:
         st.subheader("Workspace")
         files = workspace_list(session_id)
@@ -186,6 +188,29 @@ def main_content() -> None:
                 mime="application/gzip",
                 use_container_width=True,
             )
+
+        with st.expander("⬆️ Upload file"):
+            uploaded = st.file_uploader("Choose file", key=f"uploader__{session_id}")
+            if uploaded is not None:
+                dest = st.text_input(
+                    "Save as",
+                    value=uploaded.name,
+                    key=f"upload_dest__{session_id}",
+                )
+                if st.button("Upload", key=f"upload_btn__{session_id}", use_container_width=True):
+                    try:
+                        resp = httpx.post(
+                            f"{gateway_base}/upload/{session_id}",
+                            params={"path": dest},
+                            content=uploaded.getvalue(),
+                            headers={"Content-Type": "application/octet-stream"},
+                            timeout=60,
+                        )
+                        resp.raise_for_status()
+                        st.success(f"Uploaded to {dest}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Upload failed: {e}")
 
     selected_file = st.session_state.get("selected_file")
 
