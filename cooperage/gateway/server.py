@@ -16,6 +16,7 @@ All heavy lifting is delegated to the session manager and orchestrator.
 """
 
 import asyncio
+import itertools
 import json
 import logging
 from typing import Any
@@ -34,8 +35,24 @@ logger = logging.getLogger(__name__)
 
 app = Server("cooperage-gateway")
 
+# Incrementing JSON-RPC request IDs
+_rpc_id_counter = itertools.count(1)
+
+# Shared httpx client (created lazily, cleaned up on shutdown)
+_http_client: httpx.AsyncClient | None = None
+
+
+async def _get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(timeout=120)
+    return _http_client
+
+
 # Tracks server names that are currently warming up, keyed by session_id.
 _warming: dict[str, set[str]] = {}
+# Tracks warmup tasks so they can be cancelled on session teardown.
+_warmup_tasks: dict[str, list[asyncio.Task]] = {}
 
 # ── Built-in servers ──────────────────────────────────────────────────────────
 
@@ -254,7 +271,10 @@ async def list_tools() -> list[types.Tool]:
     ]
 
 
-# ── Tool handlers ─────────────────────────────────────────────────────────────
+# ── Tool dispatch ─────────────────────────────────────────────────────────────
+
+_TOOL_HANDLERS: dict[str, Any] = {}  # populated after handler functions are defined
+
 
 @app.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
@@ -286,13 +306,13 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
             args.get("arguments", {}),
         )
     if name == "cooperage_end_session":
-        return _end_session(args["session_id"])
+        return await _end_session(args["session_id"])
     if name == "cooperage_workspace_write":
         return await _workspace_op(args["session_id"], "workspace_write", {
             "path": args["path"], "content": args["content"],
         })
     if name == "cooperage_workspace_read":
-        op_args = {"path": args["path"]}
+        op_args: dict[str, Any] = {"path": args["path"]}
         if "max_size" in args:
             op_args["max_size"] = args["max_size"]
         return await _workspace_op(args["session_id"], "workspace_read", op_args)
@@ -304,6 +324,8 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
         return await _proxy_call_tool(args["session_id"], _COMPUTE_SERVER_NAME, "run_bash", {"script": args["script"]})
     raise ValueError(f"Unknown tool: {name!r}")
 
+
+# ── Tool implementations ─────────────────────────────────────────────────────
 
 def _list_sessions() -> list[dict]:
     all_sessions = sessions.list_sessions()
@@ -345,7 +367,7 @@ def _list_servers() -> list[dict]:
             "cached": orch.image_exists(s.image),
         }
         for s in registry.load()
-        if s.name not in _BUILTIN_SERVER_NAMES  # hide internal servers
+        if s.name not in _BUILTIN_SERVER_NAMES
     ]
 
 
@@ -362,8 +384,11 @@ async def _create_session(name: str | None) -> dict:
     session = sessions.create_session(name=name)
     servers_to_warm = [_WORKSPACE_SERVER_DEF, _COMPUTE_SERVER_DEF]
     _warming[session.id] = {s.name for s in servers_to_warm}
+    tasks = []
     for server_def in servers_to_warm:
-        asyncio.create_task(_warmup_builtin(session.id, server_def))
+        task = asyncio.create_task(_warmup_builtin(session.id, server_def))
+        tasks.append(task)
+    _warmup_tasks[session.id] = tasks
     return {
         "session_id": session.id,
         "name": session.name,
@@ -376,6 +401,8 @@ async def _warmup_builtin(session_id: str, server_def: ServerDef) -> None:
     try:
         await asyncio.to_thread(sessions.get_or_start_container, session_id, server_def)
         logger.info("%s container ready for session %s", server_def.name, session_id[:8])
+    except asyncio.CancelledError:
+        logger.info("%s warmup cancelled for session %s", server_def.name, session_id[:8])
     except Exception as e:
         logger.warning("%s pre-warm failed for session %s: %s", server_def.name, session_id[:8], e)
     finally:
@@ -384,7 +411,11 @@ async def _warmup_builtin(session_id: str, server_def: ServerDef) -> None:
             del _warming[session_id]
 
 
-def _end_session(session_id: str) -> dict:
+async def _end_session(session_id: str) -> dict:
+    # Cancel any in-flight warmup tasks
+    for task in _warmup_tasks.pop(session_id, []):
+        task.cancel()
+    _warming.pop(session_id, None)
     ok = sessions.end_session(session_id)
     return {"ended": ok, "session_id": session_id}
 
@@ -401,16 +432,18 @@ async def _workspace_op(session_id: str, tool_name: str, arguments: dict) -> Any
     return await _proxy_call_tool(session_id, _WORKSPACE_SERVER_NAME, tool_name, arguments)
 
 
+# ── MCP proxy ─────────────────────────────────────────────────────────────────
+
 _MCP_HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
 
 
 async def _proxy_list_tools(session_id: str, server_name: str) -> list[dict]:
     info = await _ensure_container(session_id, server_name)
-    payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(f"{info.mcp_url}/mcp", json=payload, headers=_MCP_HEADERS)
-        resp.raise_for_status()
-        data = resp.json()
+    payload = {"jsonrpc": "2.0", "id": next(_rpc_id_counter), "method": "tools/list", "params": {}}
+    client = await _get_http_client()
+    resp = await client.post(f"{info.mcp_url}/mcp", json=payload, headers=_MCP_HEADERS, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
     return data.get("result", {}).get("tools", [])
 
 
@@ -423,14 +456,14 @@ async def _proxy_call_tool(
     info = await _ensure_container(session_id, server_name)
     payload = {
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": next(_rpc_id_counter),
         "method": "tools/call",
         "params": {"name": tool_name, "arguments": arguments},
     }
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(f"{info.mcp_url}/mcp", json=payload, headers=_MCP_HEADERS)
-        resp.raise_for_status()
-        data = resp.json()
+    client = await _get_http_client()
+    resp = await client.post(f"{info.mcp_url}/mcp", json=payload, headers=_MCP_HEADERS)
+    resp.raise_for_status()
+    data = resp.json()
 
     if "error" in data:
         raise RuntimeError(data["error"].get("message", str(data["error"])))
@@ -450,8 +483,7 @@ async def _proxy_call_tool(
 # ── Upload endpoint ───────────────────────────────────────────────────────────
 
 async def _send_json_response(send, status: int, body: dict) -> None:
-    import json as _json
-    body_bytes = _json.dumps(body).encode()
+    body_bytes = json.dumps(body).encode()
     await send({
         "type": "http.response.start",
         "status": status,
@@ -508,8 +540,12 @@ async def run_stdio() -> None:
     from cooperage.session.manager import start_cleanup_thread
     _ensure_builtins_registered()
     start_cleanup_thread()
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await app.run(read_stream, write_stream, app.create_initialization_options())
+    finally:
+        if _http_client and not _http_client.is_closed:
+            await _http_client.aclose()
 
 
 async def run_sse(host: str | None = None, port: int | None = None) -> None:
@@ -548,4 +584,8 @@ async def run_sse(host: str | None = None, port: int | None = None) -> None:
         log_level="info",
     )
     server = uvicorn.Server(config)
-    await server.serve()
+    try:
+        await server.serve()
+    finally:
+        if _http_client and not _http_client.is_closed:
+            await _http_client.aclose()

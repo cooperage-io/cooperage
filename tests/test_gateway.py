@@ -4,7 +4,7 @@ Tests cover each tool's logic independently.
 """
 import json
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cooperage.core.models import ContainerInfo, ServerDef, Session
@@ -134,18 +134,20 @@ async def test_create_session_triggers_warmup(mock_create, mock_warmup):
 
 # ── cooperage_end_session ───────────────────────────────────────────────────────
 
+@pytest.mark.asyncio
 @patch("cooperage.gateway.server.sessions.end_session", return_value=True)
-def test_end_session_success(mock_end):
+async def test_end_session_success(mock_end):
     from cooperage.gateway.server import _end_session
-    result = _end_session("abc123")
+    result = await _end_session("abc123")
     assert result["ended"] is True
     assert result["session_id"] == "abc123"
 
 
+@pytest.mark.asyncio
 @patch("cooperage.gateway.server.sessions.end_session", return_value=False)
-def test_end_session_unknown(mock_end):
+async def test_end_session_unknown(mock_end):
     from cooperage.gateway.server import _end_session
-    result = _end_session("nosuchid")
+    result = await _end_session("nosuchid")
     assert result["ended"] is False
 
 
@@ -153,8 +155,8 @@ def test_end_session_unknown(mock_end):
 
 @pytest.mark.asyncio
 @patch("cooperage.gateway.server._ensure_container")
-@patch("cooperage.gateway.server.httpx.AsyncClient")
-async def test_proxy_list_tools(mock_httpx_cls, mock_ensure):
+@patch("cooperage.gateway.server._get_http_client")
+async def test_proxy_list_tools(mock_get_client, mock_ensure):
     info = _info()
     mock_ensure.return_value = info
     mock_resp = MagicMock()
@@ -164,10 +166,8 @@ async def test_proxy_list_tools(mock_httpx_cls, mock_ensure):
         "result": {"tools": [{"name": "run_sim", "description": "Run simulation"}]},
     }
     mock_client = AsyncMock()
-    mock_client.__aenter__.return_value = mock_client
-    mock_client.__aexit__.return_value = None
     mock_client.post.return_value = mock_resp
-    mock_httpx_cls.return_value = mock_client
+    mock_get_client.return_value = mock_client
 
     from cooperage.gateway.server import _proxy_list_tools
     tools = await _proxy_list_tools("session1", "sim")
@@ -187,8 +187,8 @@ async def test_ensure_container_raises_for_unknown_server(mock_get):
 
 @pytest.mark.asyncio
 @patch("cooperage.gateway.server._ensure_container")
-@patch("cooperage.gateway.server.httpx.AsyncClient")
-async def test_proxy_call_tool_returns_text(mock_httpx_cls, mock_ensure):
+@patch("cooperage.gateway.server._get_http_client")
+async def test_proxy_call_tool_returns_text(mock_get_client, mock_ensure):
     info = _info()
     mock_ensure.return_value = info
     mock_resp = MagicMock()
@@ -198,10 +198,8 @@ async def test_proxy_call_tool_returns_text(mock_httpx_cls, mock_ensure):
         "result": {"content": [{"type": "text", "text": "mean=2.0"}]},
     }
     mock_client = AsyncMock()
-    mock_client.__aenter__.return_value = mock_client
-    mock_client.__aexit__.return_value = None
     mock_client.post.return_value = mock_resp
-    mock_httpx_cls.return_value = mock_client
+    mock_get_client.return_value = mock_client
 
     from cooperage.gateway.server import _proxy_call_tool
     result = await _proxy_call_tool("s1", "sim", "run_sim", {"input": "x"})
@@ -210,8 +208,8 @@ async def test_proxy_call_tool_returns_text(mock_httpx_cls, mock_ensure):
 
 @pytest.mark.asyncio
 @patch("cooperage.gateway.server._ensure_container")
-@patch("cooperage.gateway.server.httpx.AsyncClient")
-async def test_proxy_call_tool_raises_on_mcp_error(mock_httpx_cls, mock_ensure):
+@patch("cooperage.gateway.server._get_http_client")
+async def test_proxy_call_tool_raises_on_mcp_error(mock_get_client, mock_ensure):
     info = _info()
     mock_ensure.return_value = info
     mock_resp = MagicMock()
@@ -221,10 +219,8 @@ async def test_proxy_call_tool_raises_on_mcp_error(mock_httpx_cls, mock_ensure):
         "error": {"code": -32000, "message": "tool crashed"},
     }
     mock_client = AsyncMock()
-    mock_client.__aenter__.return_value = mock_client
-    mock_client.__aexit__.return_value = None
     mock_client.post.return_value = mock_resp
-    mock_httpx_cls.return_value = mock_client
+    mock_get_client.return_value = mock_client
 
     from cooperage.gateway.server import _proxy_call_tool
     with pytest.raises(RuntimeError, match="tool crashed"):

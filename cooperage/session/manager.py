@@ -1,14 +1,13 @@
 import json
 import logging
 import threading
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from cooperage.core.config import settings
 from cooperage.core.models import ContainerInfo, Session, ServerDef
 from cooperage.orchestrator import get_orchestrator
-
-orch = get_orchestrator()
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +24,21 @@ def _sessions_path() -> Path:
     return settings.sessions_path
 
 
-def _save() -> None:
-    path = _sessions_path()
+def _atomic_write(path: Path, data: str) -> None:
+    """Write data to path atomically via temp file + rename."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with open(fd, "w") as f:
+            f.write(data)
+        Path(tmp).rename(path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def _save() -> None:
+    """Persist sessions to disk. Caller must hold _lock."""
     data = []
     for session in _sessions.values():
         entry = session.model_dump(mode="json")
@@ -36,7 +47,7 @@ def _save() -> None:
             for name, info in _containers.get(session.id, {}).items()
         }
         data.append(entry)
-    path.write_text(json.dumps(data, indent=2, default=str))
+    _atomic_write(_sessions_path(), json.dumps(data, indent=2, default=str))
 
 
 def _load_from_file() -> None:
@@ -57,9 +68,21 @@ def _load_from_file() -> None:
         logger.warning("Could not load sessions from %s: %s", path, e)
 
 
+def _parse_file_entry(entry: dict) -> tuple[Session, dict[str, ContainerInfo]]:
+    """Parse a single session entry from the JSON file."""
+    container_data = entry.pop("_containers", {})
+    containers = {
+        name: ContainerInfo(**info)
+        for name, info in container_data.items()
+    }
+    session = Session(**entry)
+    return session, containers
+
+
 # ── Session lifecycle ─────────────────────────────────────────────────────────
 
 def create_session(name: str | None = None) -> Session:
+    orch = get_orchestrator()
     session = Session(
         name=name,
         expires_at=datetime.now(timezone.utc) + timedelta(seconds=settings.session_ttl_seconds),
@@ -87,12 +110,7 @@ def get_session(session_id: str) -> Session | None:
         data = json.loads(path.read_text())
         for entry in data:
             if entry["id"] == session_id:
-                container_data = {k: v for k, v in entry.items() if k == "_containers"}
-                containers = {
-                    name: ContainerInfo(**info)
-                    for name, info in entry.get("_containers", {}).items()
-                }
-                session = Session(**{k: v for k, v in entry.items() if k != "_containers"})
+                session, containers = _parse_file_entry(entry)
                 with _lock:
                     _sessions[session.id] = session
                     _containers[session.id] = containers
@@ -109,12 +127,15 @@ def list_sessions() -> list[Session]:
     try:
         data = json.loads(path.read_text()) if path.exists() else []
         file_ids = {e["id"] for e in data}
-        file_sessions = {e["id"]: Session(**e) for e in data}
+        file_sessions = {}
+        for e in data:
+            entry_copy = dict(e)
+            entry_copy.pop("_containers", None)
+            file_sessions[e["id"]] = Session(**entry_copy)
     except Exception:
         file_ids = None
         file_sessions = {}
     with _lock:
-        # Evict in-memory sessions that were deleted by another process
         if file_ids is not None:
             for sid in list(_sessions.keys()):
                 if sid not in file_ids:
@@ -125,6 +146,7 @@ def list_sessions() -> list[Session]:
 
 
 def end_session(session_id: str) -> bool:
+    orch = get_orchestrator()
     with _lock:
         session = _sessions.pop(session_id, None)
         container_map = _containers.pop(session_id, {})
@@ -143,13 +165,13 @@ def end_session(session_id: str) -> bool:
     except Exception as e:
         logger.warning("Failed to remove volume %s: %s", session.volume_name, e)
 
-    # Remove from file too
+    # Remove from file atomically
     path = _sessions_path()
     if path.exists():
         try:
             data = json.loads(path.read_text())
             data = [e for e in data if e["id"] != session_id]
-            path.write_text(json.dumps(data, indent=2, default=str))
+            _atomic_write(path, json.dumps(data, indent=2, default=str))
         except Exception as e:
             logger.warning("Could not update sessions file: %s", e)
 
@@ -160,7 +182,8 @@ def end_session(session_id: str) -> bool:
 # ── Container management within a session ────────────────────────────────────
 
 def get_or_start_container(session_id: str, server_def: ServerDef) -> ContainerInfo:
-    session = get_session(session_id)  # also loads from file if needed
+    orch = get_orchestrator()
+    session = get_session(session_id)
     if session is None:
         raise ValueError(f"Session {session_id!r} not found")
     with _lock:
