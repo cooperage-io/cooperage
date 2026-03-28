@@ -469,7 +469,11 @@ async def _ensure_container(session_id: str, server_name: str) -> ContainerInfo:
     server_def = registry.get(server_name)
     if server_def is None:
         raise ValueError(f"No server named {server_name!r} in registry")
-    return await asyncio.to_thread(sessions.get_or_start_container, session_id, server_def)
+    info = await asyncio.to_thread(sessions.get_or_start_container, session_id, server_def)
+    # Record activity for idle timeout tracking
+    sessions.touch_container(session_id, server_name)
+    sessions.touch_session(session_id)
+    return info
 
 
 async def _workspace_op(session_id: str, tool_name: str, arguments: dict) -> Any:

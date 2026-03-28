@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     # Sessions
     session_ttl_seconds: int = 1800  # 30 minutes
     session_cleanup_interval: int = 60  # seconds
+    container_idle_timeout: int = 600  # 10 min — stop idle containers to free resources
+    session_extend_on_activity: bool = True  # reset TTL on each tool call
 
     # Registry
     registry_path: Path = Path.home() / ".cooperage" / "registry.json"

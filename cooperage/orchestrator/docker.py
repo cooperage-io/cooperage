@@ -107,6 +107,13 @@ class DockerOrchestrator(Orchestrator):
             logger.info("Removed stale container %s", container_name)
         except docker.errors.NotFound:
             pass
+        except docker.errors.APIError as e:
+            if "already in progress" in str(e):
+                logger.info("Container %s removal already in progress, waiting", container_name)
+                import time
+                time.sleep(2)
+            else:
+                raise
 
         # Login to private registry if credentials are provided
         if server_def.registry_credentials:
@@ -129,10 +136,16 @@ class DockerOrchestrator(Orchestrator):
         mem_bytes = _parse_memory_string(memory)
         nano_cpus = int(float(cpu) * 1e9)
 
-        # Network config
+        # Network config — verify the network still exists before attaching
         network_mode = None
         if settings.network_isolation and session.network_name:
-            network_mode = session.network_name
+            try:
+                self.client.networks.get(session.network_name)
+                network_mode = session.network_name
+            except docker.errors.NotFound:
+                logger.warning("Session network %s missing, recreating", session.network_name)
+                self.create_session_network(session)
+                network_mode = session.network_name
 
         container = self.client.containers.run(
             image=server_def.image,
@@ -183,3 +196,8 @@ class DockerOrchestrator(Orchestrator):
             logger.info("Stopped and removed container %s", container_id[:12])
         except docker.errors.NotFound:
             pass
+        except docker.errors.APIError as e:
+            if "already in progress" in str(e) or "is not running" in str(e):
+                logger.info("Container %s already stopping/removed", container_id[:12])
+            else:
+                raise

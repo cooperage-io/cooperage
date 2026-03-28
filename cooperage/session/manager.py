@@ -234,18 +234,81 @@ def get_container(session_id: str, server_name: str) -> ContainerInfo | None:
         return _containers.get(session_id, {}).get(server_name)
 
 
-# ── TTL cleanup background thread ────────────────────────────────────────────
+# ── Activity tracking ─────────────────────────────────────────────────────────
+
+def touch_container(session_id: str, server_name: str) -> None:
+    """Record activity on a container (called on every tool invocation)."""
+    now = datetime.now(timezone.utc)
+    with _lock:
+        info = _containers.get(session_id, {}).get(server_name)
+        if info is not None:
+            info.last_activity = now
+
+
+def touch_session(session_id: str) -> None:
+    """Extend session TTL on activity (if enabled)."""
+    if not settings.session_extend_on_activity:
+        return
+    now = datetime.now(timezone.utc)
+    new_expiry = now + timedelta(seconds=settings.session_ttl_seconds)
+    with _lock:
+        session = _sessions.get(session_id)
+        if session is not None:
+            session.expires_at = new_expiry
+            _save()
+
+
+# ── Cleanup background thread ────────────────────────────────────────────────
+
+def _cleanup_idle_containers() -> None:
+    """Stop containers that haven't been used within the idle timeout."""
+    if settings.container_idle_timeout <= 0:
+        return
+    orch = get_orchestrator()
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=settings.container_idle_timeout)
+    to_stop: list[tuple[str, str, ContainerInfo]] = []
+
+    with _lock:
+        for sid, container_map in _containers.items():
+            for server_name, info in container_map.items():
+                if info.last_activity < cutoff:
+                    to_stop.append((sid, server_name, info))
+
+    for sid, server_name, info in to_stop:
+        logger.info(
+            "Container %s (server=%s, session=%s) idle for >%ds, stopping",
+            info.container_id[:12], server_name, sid[:8],
+            settings.container_idle_timeout,
+        )
+        try:
+            orch.stop_container(info.container_id)
+        except Exception as e:
+            logger.warning("Failed to stop idle container %s: %s", info.container_id[:12], e)
+
+        with _lock:
+            if sid in _containers and server_name in _containers[sid]:
+                del _containers[sid][server_name]
+            if sid in _sessions and server_name in _sessions[sid].containers:
+                del _sessions[sid].containers[server_name]
+            _save()
+
 
 def _cleanup_loop() -> None:
     import time
     while True:
         time.sleep(settings.session_cleanup_interval)
         now = datetime.now(timezone.utc)
+
+        # Expire whole sessions
         with _lock:
             expired = [sid for sid, s in _sessions.items() if s.expires_at <= now]
         for sid in expired:
             logger.info("Session %s expired, cleaning up", sid)
             end_session(sid)
+
+        # Reap idle containers (within active sessions)
+        _cleanup_idle_containers()
 
 
 def start_cleanup_thread() -> None:

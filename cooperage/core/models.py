@@ -31,6 +31,7 @@ class ContainerInfo(BaseModel):
     server_name: str
     session_id: str
     host_port: int
+    last_activity: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
     def mcp_url(self) -> str:
