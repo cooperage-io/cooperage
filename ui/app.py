@@ -19,7 +19,9 @@ import tarfile
 from urllib.parse import urlencode
 
 import httpx
+import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="Cooperage",
@@ -37,10 +39,12 @@ AUTO_REFRESH = st.sidebar.slider("Auto-refresh (seconds)", 1, 30, 1)
 
 # ── OIDC state helpers ────────────────────────────────────────────────────────
 
-def _fetch_oidc_config() -> dict | None:
-    """Fetch OIDC config from the gateway. Returns None if not configured."""
+@st.cache_data(ttl=60)
+def _fetch_oidc_config(_base_url: str) -> dict | None:
+    """Fetch OIDC config from the gateway. Cached for 60s since this rarely changes.
+    _base_url is a cache key so it reruns if the gateway URL changes."""
     try:
-        resp = httpx.get(f"{_gateway_base()}/oidc-config", timeout=5)
+        resp = httpx.get(f"{_base_url}/oidc-config", timeout=5)
         if resp.status_code == 200:
             return resp.json()
     except Exception:
@@ -87,6 +91,10 @@ def _handle_oidc_callback() -> None:
         token = tokens.get("id_token") or tokens.get("access_token")
         if token:
             st.session_state["_oidc_token"] = token
+        # Clear PKCE state after successful exchange
+        st.session_state.pop("_oidc_state", None)
+        st.session_state.pop("_oidc_verifier", None)
+        st.session_state.pop("_oidc_challenge", None)
     except Exception as e:
         st.error(f"SSO token exchange failed: {e}")
 
@@ -94,9 +102,17 @@ def _handle_oidc_callback() -> None:
 
 
 def _get_redirect_uri() -> str:
-    """Build the OAuth2 redirect URI pointing back to this Streamlit app."""
-    # Streamlit apps run on localhost:8501 by default
-    return "http://localhost:8501"
+    """Build the OAuth2 redirect URI pointing back to this Streamlit app.
+    Uses the browser's current URL so it works in both local and deployed environments."""
+    try:
+        ctx = st.context
+        headers = ctx.headers
+        # Respect X-Forwarded headers from reverse proxies
+        proto = headers.get("X-Forwarded-Proto", "http")
+        host = headers.get("Host", "localhost:8501")
+        return f"{proto}://{host}"
+    except Exception:
+        return "http://localhost:8501"
 
 
 def _generate_pkce() -> tuple[str, str]:
@@ -109,12 +125,15 @@ def _generate_pkce() -> tuple[str, str]:
 
 
 def _start_oidc_login(oidc: dict) -> str:
-    """Build the OIDC authorization URL and store state for later verification."""
-    state = secrets.token_urlsafe(32)
-    verifier, challenge = _generate_pkce()
+    """Build the OIDC authorization URL and store state for later verification.
+    Reuses existing PKCE state if already generated (avoids invalidating
+    the state on every Streamlit rerun before the user clicks the button)."""
+    if "_oidc_state" not in st.session_state:
+        st.session_state["_oidc_state"] = secrets.token_urlsafe(32)
+        verifier, challenge = _generate_pkce()
+        st.session_state["_oidc_verifier"] = verifier
+        st.session_state["_oidc_challenge"] = challenge
 
-    st.session_state["_oidc_state"] = state
-    st.session_state["_oidc_verifier"] = verifier
     st.session_state["_oidc_config"] = oidc
 
     params = {
@@ -122,8 +141,8 @@ def _start_oidc_login(oidc: dict) -> str:
         "client_id": oidc["client_id"],
         "redirect_uri": _get_redirect_uri(),
         "scope": oidc["scopes"],
-        "state": state,
-        "code_challenge": challenge,
+        "state": st.session_state["_oidc_state"],
+        "code_challenge": st.session_state["_oidc_challenge"],
         "code_challenge_method": "S256",
     }
     return f"{oidc['authorization_endpoint']}?{urlencode(params)}"
@@ -133,7 +152,7 @@ def _start_oidc_login(oidc: dict) -> str:
 
 def _render_auth_sidebar() -> None:
     """Render the authentication section in the sidebar."""
-    oidc = _fetch_oidc_config()
+    oidc = _fetch_oidc_config(_gateway_base())
 
     with st.sidebar.expander("🔑 Authentication", expanded=not _get_token()):
         if oidc:
@@ -141,9 +160,8 @@ def _render_auth_sidebar() -> None:
             if st.session_state.get("_oidc_token"):
                 st.success("Signed in via SSO")
                 if st.button("Sign out", use_container_width=True):
-                    st.session_state.pop("_oidc_token", None)
-                    st.session_state.pop("_oidc_state", None)
-                    st.session_state.pop("_oidc_verifier", None)
+                    for key in ("_oidc_token", "_oidc_state", "_oidc_verifier", "_oidc_challenge", "_oidc_config"):
+                        st.session_state.pop(key, None)
                     st.rerun()
             else:
                 login_url = _start_oidc_login(oidc)
@@ -204,8 +222,11 @@ def call_tool(tool_name: str, arguments: dict) -> str:
 
 # ── Gateway connectivity check ───────────────────────────────────────────────
 
-def _check_gateway() -> str | None:
-    """Return an error message if the gateway is unreachable, or None if OK."""
+@st.cache_data(ttl=5)
+def _check_gateway(_url: str, _token: str) -> str | None:
+    """Return an error message if the gateway is unreachable, or None if OK.
+    Cached for 5 seconds to avoid hammering the gateway on every fragment refresh.
+    _url and _token are cache keys so the check reruns when config changes."""
     try:
         _call("tools/list", {})
         return None
@@ -315,6 +336,7 @@ def _render_preview(session_id: str, selected_file: str) -> None:
         content = workspace_read(session_id, selected_file, max_size=0)
         ext = selected_file.rsplit(".", 1)[-1].lower() if "." in selected_file else ""
 
+        # Parse once — detect binary (base64-encoded) vs text content
         binary = None
         try:
             parsed = json.loads(content)
@@ -323,13 +345,39 @@ def _render_preview(session_id: str, selected_file: str) -> None:
         except Exception:
             pass
 
+        # Resolve raw bytes once for both preview and download
+        if binary is not None:
+            dl_data = base64.b64decode(binary["data"])
+            dl_mime = binary.get("mime", "application/octet-stream")
+        else:
+            dl_data = content.encode("utf-8")
+            dl_mime = "text/plain"
+
         with st.container(height=500):
             if binary is not None:
-                mime = binary.get("mime", "")
-                if mime.startswith("image/"):
-                    st.image(base64.b64decode(binary["data"]))
+                if dl_mime.startswith("image/"):
+                    st.image(dl_data)
+                elif dl_mime == "application/pdf":
+                    b64_pdf = base64.b64encode(dl_data).decode()
+                    components.html(
+                        f'<embed src="data:application/pdf;base64,{b64_pdf}" '
+                        f'width="100%" height="480px" type="application/pdf">',
+                        height=490, scrolling=False,
+                    )
                 else:
                     st.caption(f"Cannot preview .{ext} files")
+            elif ext in ("html", "htm", "svg"):
+                components.html(content, height=480, scrolling=True)
+            elif ext in ("csv", "tsv"):
+                sep = "\t" if ext == "tsv" else ","
+                try:
+                    df = pd.read_csv(io.StringIO(content), sep=sep)
+                    st.dataframe(df, use_container_width=True)
+                except Exception:
+                    st.code(content)
+            elif ext == "pdf":
+                # Text-mode PDF (shouldn't happen, but handle gracefully)
+                st.code(content)
             elif ext == "json":
                 try:
                     st.json(json.loads(content))
@@ -341,7 +389,6 @@ def _render_preview(session_id: str, selected_file: str) -> None:
                 st.code(content)
 
         st.divider()
-        dl_data, dl_mime = workspace_read_raw(session_id, selected_file)
         st.download_button(
             f"⬇️ Download {selected_file.split('/')[-1]}",
             data=dl_data,
@@ -358,7 +405,7 @@ def _render_preview(session_id: str, selected_file: str) -> None:
 @st.fragment(run_every=AUTO_REFRESH)
 def main_content() -> None:
     # Check gateway connectivity first
-    error = _check_gateway()
+    error = _check_gateway(GATEWAY_URL, _get_token())
     if error is not None:
         st.error(error)
         return

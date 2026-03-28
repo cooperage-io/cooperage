@@ -37,6 +37,12 @@ def _mock_orch(image_exists=True, pull_return="sha256:abc"):
     return orch
 
 
+def _set_auth_ctx(auth: AuthContext | None = None):
+    """Set the gateway's per-request auth context var for testing."""
+    from cooperage.gateway.server import _auth_ctx
+    return _auth_ctx.set(auth or _DEFAULT_AUTH)
+
+
 # ── cooperage_list_servers ──────────────────────────────────────────────────────
 
 @patch("cooperage.gateway.server.get_orchestrator")
@@ -47,8 +53,8 @@ def test_list_servers_returns_names_and_descriptions(mock_load, mock_get_orch):
         ServerDef(name="sim", image="sim:latest", description="Sim runner"),
         ServerDef(name="cfd", image="cfd:latest", description="CFD solver"),
     ]
-    from cooperage.gateway.server import _list_servers
-    result = _list_servers(_DEFAULT_AUTH)
+    from cooperage.gateway.server import list_servers
+    result = list_servers(auth=_DEFAULT_AUTH)
     assert len(result) == 2
     assert result[0]["name"] == "sim"
     assert result[1]["description"] == "CFD solver"
@@ -59,8 +65,8 @@ def test_list_servers_returns_names_and_descriptions(mock_load, mock_get_orch):
 def test_list_servers_includes_cached_flag(mock_load, mock_get_orch):
     mock_get_orch.return_value = _mock_orch(image_exists=False)
     mock_load.return_value = [ServerDef(name="sim", image="sim:latest")]
-    from cooperage.gateway.server import _list_servers
-    result = _list_servers(_DEFAULT_AUTH)
+    from cooperage.gateway.server import list_servers
+    result = list_servers(auth=_DEFAULT_AUTH)
     assert result[0]["cached"] is False
 
 
@@ -68,8 +74,8 @@ def test_list_servers_includes_cached_flag(mock_load, mock_get_orch):
 @patch("cooperage.gateway.server.registry.load", return_value=[])
 def test_list_servers_empty(mock_load, mock_get_orch):
     mock_get_orch.return_value = _mock_orch()
-    from cooperage.gateway.server import _list_servers
-    assert _list_servers(_DEFAULT_AUTH) == []
+    from cooperage.gateway.server import list_servers
+    assert list_servers(auth=_DEFAULT_AUTH) == []
 
 
 @patch("cooperage.gateway.server.get_orchestrator")
@@ -80,8 +86,8 @@ def test_list_servers_hides_workspace_server(mock_load, mock_get_orch):
         ServerDef(name="__workspace__", image="cooperage-workspace:latest"),
         ServerDef(name="sim", image="sim:latest"),
     ]
-    from cooperage.gateway.server import _list_servers
-    result = _list_servers(_DEFAULT_AUTH)
+    from cooperage.gateway.server import list_servers
+    result = list_servers(auth=_DEFAULT_AUTH)
     assert len(result) == 1
     assert result[0]["name"] == "sim"
 
@@ -94,8 +100,8 @@ def test_list_servers_hides_workspace_server(mock_load, mock_get_orch):
 async def test_pull_server_success(mock_get, mock_get_orch):
     mock_get_orch.return_value = _mock_orch(pull_return="sha256:abc123")
     mock_get.return_value = ServerDef(name="sim", image="sim:latest")
-    from cooperage.gateway.server import _pull_server
-    result = await _pull_server("sim")
+    from cooperage.gateway.server import pull_server
+    result = await pull_server(server_name="sim")
     assert result["server"] == "sim"
     assert result["image_id"] == "sha256:abc123"
 
@@ -103,9 +109,9 @@ async def test_pull_server_success(mock_get, mock_get_orch):
 @pytest.mark.asyncio
 @patch("cooperage.gateway.server.registry.get", return_value=None)
 async def test_pull_server_unknown_raises(mock_get):
-    from cooperage.gateway.server import _pull_server
+    from cooperage.gateway.server import pull_server
     with pytest.raises(ValueError, match="No server named"):
-        await _pull_server("ghost")
+        await pull_server(server_name="ghost")
 
 
 # ── cooperage_create_session ────────────────────────────────────────────────────
@@ -116,8 +122,8 @@ async def test_pull_server_unknown_raises(mock_get):
 async def test_create_session_returns_expected_keys(mock_create, mock_warmup):
     session = _session(name="test-run")
     mock_create.return_value = session
-    from cooperage.gateway.server import _create_session
-    result = await _create_session("test-run", _DEFAULT_AUTH)
+    from cooperage.gateway.server import create_session
+    result = await create_session(auth=_DEFAULT_AUTH, name="test-run")
     assert result["session_id"] == session.id
     assert result["name"] == "test-run"
     assert result["volume"] == session.volume_name
@@ -131,8 +137,8 @@ async def test_create_session_returns_expected_keys(mock_create, mock_warmup):
 async def test_create_session_triggers_warmup(mock_create, mock_warmup):
     session = _session()
     mock_create.return_value = session
-    from cooperage.gateway.server import _create_session
-    await _create_session(None, _DEFAULT_AUTH)
+    from cooperage.gateway.server import create_session
+    await create_session(auth=_DEFAULT_AUTH)
     assert mock_warmup.call_count == 2  # workspace + compute
 
 
@@ -141,8 +147,8 @@ async def test_create_session_triggers_warmup(mock_create, mock_warmup):
 @pytest.mark.asyncio
 @patch("cooperage.gateway.server.sessions.end_session", return_value=True)
 async def test_end_session_success(mock_end):
-    from cooperage.gateway.server import _end_session
-    result = await _end_session("abc123")
+    from cooperage.gateway.server import end_session
+    result = await end_session(session_id="abc123")
     assert result["ended"] is True
     assert result["session_id"] == "abc123"
 
@@ -150,8 +156,8 @@ async def test_end_session_success(mock_end):
 @pytest.mark.asyncio
 @patch("cooperage.gateway.server.sessions.end_session", return_value=False)
 async def test_end_session_unknown(mock_end):
-    from cooperage.gateway.server import _end_session
-    result = await _end_session("nosuchid")
+    from cooperage.gateway.server import end_session
+    result = await end_session(session_id="nosuchid")
     assert result["ended"] is False
 
 
@@ -173,8 +179,8 @@ async def test_proxy_list_tools(mock_get_client, mock_ensure):
     mock_client.post.return_value = mock_resp
     mock_get_client.return_value = mock_client
 
-    from cooperage.gateway.server import _proxy_list_tools
-    tools = await _proxy_list_tools("session1", "sim")
+    from cooperage.gateway.server import proxy_list_tools
+    tools = await proxy_list_tools(session_id="session1", server_name="sim")
     assert len(tools) == 1
     assert tools[0]["name"] == "run_sim"
 
@@ -267,9 +273,14 @@ async def test_workspace_list_proxies_to_workspace_server(mock_proxy):
 async def test_dispatch_workspace_write(mock_op, mock_check):
     mock_op.return_value = {"written": "plan.md"}
     from cooperage.gateway.server import _dispatch
-    await _dispatch("cooperage_workspace_write", {
-        "session_id": "s1", "path": "plan.md", "content": "hello"
-    })
+    token = _set_auth_ctx()
+    try:
+        await _dispatch("cooperage_workspace_write", {
+            "session_id": "s1", "path": "plan.md", "content": "hello"
+        })
+    finally:
+        from cooperage.gateway.server import _auth_ctx
+        _auth_ctx.reset(token)
     mock_op.assert_called_once_with("s1", "workspace_write", {"path": "plan.md", "content": "hello"})
 
 
@@ -279,7 +290,12 @@ async def test_dispatch_workspace_write(mock_op, mock_check):
 async def test_dispatch_workspace_read(mock_op, mock_check):
     mock_op.return_value = "hello"
     from cooperage.gateway.server import _dispatch
-    await _dispatch("cooperage_workspace_read", {"session_id": "s1", "path": "plan.md"})
+    token = _set_auth_ctx()
+    try:
+        await _dispatch("cooperage_workspace_read", {"session_id": "s1", "path": "plan.md"})
+    finally:
+        from cooperage.gateway.server import _auth_ctx
+        _auth_ctx.reset(token)
     mock_op.assert_called_once_with("s1", "workspace_read", {"path": "plan.md"})
 
 
@@ -289,7 +305,12 @@ async def test_dispatch_workspace_read(mock_op, mock_check):
 async def test_dispatch_workspace_list(mock_op, mock_check):
     mock_op.return_value = []
     from cooperage.gateway.server import _dispatch
-    await _dispatch("cooperage_workspace_list", {"session_id": "s1"})
+    token = _set_auth_ctx()
+    try:
+        await _dispatch("cooperage_workspace_list", {"session_id": "s1"})
+    finally:
+        from cooperage.gateway.server import _auth_ctx
+        _auth_ctx.reset(token)
     mock_op.assert_called_once_with("s1", "workspace_list", {})
 
 

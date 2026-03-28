@@ -1,16 +1,8 @@
 """
 Cooperage MCP Gateway
 
-Exposes a single MCP server to the LLM. Tools:
-  cooperage_list_servers         — list registered MCP server images
-  cooperage_pull_server          — pre-pull a server image
-  cooperage_create_session       — create a workspace session (shared volume)
-  cooperage_list_tools           — list tools exposed by a server
-  cooperage_call_tool            — invoke a tool on a server within a session
-  cooperage_end_session          — tear down a session and its containers
-  cooperage_workspace_write      — write a file directly to the session workspace
-  cooperage_workspace_read       — read a file from the session workspace
-  cooperage_workspace_list       — list files in the session workspace
+Exposes a single MCP server to the LLM with tools for orchestrating
+ephemeral containers and resources for reading session/registry state.
 
 All heavy lifting is delegated to the session manager and orchestrator.
 """
@@ -94,271 +86,77 @@ def _ensure_builtins_registered() -> None:
         logger.info("Auto-registered built-in compute server (%s)", _COMPUTE_IMAGE)
 
 
+# ── Tool registry (decorator-based) ──────────────────────────────────────────
+
+_tools: dict[str, dict] = {}  # name → {handler, description, params, requires_session, requires_server}
+
+
+def tool(
+    name: str,
+    *,
+    description: str,
+    params: dict[str, dict] | None = None,
+    required: list[str] | None = None,
+    requires_session: bool = False,
+    requires_server: bool = False,
+):
+    """Register a gateway tool with automatic schema generation and auth wiring.
+
+    - requires_session: auto-checks session tenant ownership before calling
+    - requires_server: auto-checks server RBAC before calling
+    """
+    def decorator(fn):
+        schema = {
+            "type": "object",
+            "properties": params or {},
+            "required": required or [k for k, v in (params or {}).items()
+                                     if not v.get("description", "").startswith("Optional")],
+        }
+        _tools[name] = {
+            "handler": fn,
+            "description": description,
+            "schema": schema,
+            "requires_session": requires_session,
+            "requires_server": requires_server,
+        }
+        return fn
+    return decorator
+
+
 # ── Tool definitions ──────────────────────────────────────────────────────────
 
-@app.list_tools()
-async def list_tools() -> list[types.Tool]:
-    return [
-        types.Tool(
-            name="cooperage_list_servers",
-            description=(
-                "Discover what specialized servers are available in this Cooperage deployment. "
-                "Always call this first — registered servers may already provide domain-specific "
-                "tools (e.g. simulators, analyzers, data pipelines) that are faster and more "
-                "capable than writing a general script. "
-                "After listing, pull the servers you plan to use with cooperage_pull_server."
-            ),
-            inputSchema={"type": "object", "properties": {}, "required": []},
-        ),
-        types.Tool(
-            name="cooperage_list_sessions",
-            description="List all active sessions and their running containers.",
-            inputSchema={"type": "object", "properties": {}, "required": []},
-        ),
-        types.Tool(
-            name="cooperage_pull_server",
-            description=(
-                "Pre-pull a server's Docker image. Only needed if the image is not yet "
-                "cached locally (check the 'cached' field from cooperage_list_servers). "
-                "Skip this if cached=true — the session pre-warms containers automatically."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {"server_name": {"type": "string"}},
-                "required": ["server_name"],
-            },
-        ),
-        types.Tool(
-            name="cooperage_create_session",
-            description=(
-                "Create a new Cooperage workspace session. "
-                "Returns a session_id. All containers started within this session "
-                "share a /workspace volume for data exchange."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Optional human-readable name for the session"},
-                },
-                "required": [],
-            },
-        ),
-        types.Tool(
-            name="cooperage_list_tools",
-            description=(
-                "List tools available on a registered MCP server. "
-                "Starts the container if it isn't already running."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "session_id": {"type": "string"},
-                    "server_name": {"type": "string"},
-                },
-                "required": ["session_id", "server_name"],
-            },
-        ),
-        types.Tool(
-            name="cooperage_call_tool",
-            description=(
-                "Call a tool on a registered MCP server within a session. "
-                "Starts the container if it isn't already running. "
-                "All containers in the same session share /workspace."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "session_id": {"type": "string"},
-                    "server_name": {"type": "string"},
-                    "tool_name": {"type": "string"},
-                    "arguments": {
-                        "type": "object",
-                        "description": "Arguments to pass to the tool",
-                    },
-                },
-                "required": ["session_id", "server_name", "tool_name"],
-            },
-        ),
-        types.Tool(
-            name="cooperage_end_session",
-            description="End a session: stop all containers and delete the shared workspace volume.",
-            inputSchema={
-                "type": "object",
-                "properties": {"session_id": {"type": "string"}},
-                "required": ["session_id"],
-            },
-        ),
-        types.Tool(
-            name="cooperage_workspace_write",
-            description=(
-                "Write a file directly to the session's /workspace volume. "
-                "Use this to persist plans, notes, intermediate results, or any text "
-                "the agent needs to survive context compression. "
-                "All servers in the session can read the file."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "session_id": {"type": "string"},
-                    "path": {"type": "string", "description": "File path relative to /workspace (e.g. 'plan.md', 'results/output.json')"},
-                    "content": {"type": "string", "description": "Text content to write"},
-                },
-                "required": ["session_id", "path", "content"],
-            },
-        ),
-        types.Tool(
-            name="cooperage_workspace_read",
-            description=(
-                "Read a file from the session's /workspace volume. "
-                "Binary files (images, etc.) are returned as base64-encoded JSON. "
-                "When embedding images in HTML, always set max_size=64 to get a thumbnail — "
-                "this keeps the base64 small enough to embed without hitting size limits."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "session_id": {"type": "string"},
-                    "path": {"type": "string", "description": "File path relative to /workspace"},
-                    "max_size": {"type": "integer", "description": "For images: resize longest edge to this many pixels before returning. Use 64 when embedding in HTML. Omit for full resolution."},
-                },
-                "required": ["session_id", "path"],
-            },
-        ),
-        types.Tool(
-            name="cooperage_workspace_list",
-            description="List all files currently in the session's /workspace volume.",
-            inputSchema={
-                "type": "object",
-                "properties": {"session_id": {"type": "string"}},
-                "required": ["session_id"],
-            },
-        ),
-        types.Tool(
-            name="cooperage_run_bash",
-            description=(
-                "Execute a bash script in the session's compute container. "
-                "The /workspace directory is available as $WORKSPACE. "
-                "Useful for file manipulation, running CLI tools, or chaining commands. "
-                "Do NOT use this to read files from /workspace — use cooperage_workspace_read "
-                "instead (handles binary files and base64 encoding automatically). "
-                "Do NOT use this for domain-specific work like image analysis — "
-                "use cooperage_call_tool with a registered server instead."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "session_id": {"type": "string"},
-                    "script": {"type": "string", "description": "Bash script to execute"},
-                },
-                "required": ["session_id", "script"],
-            },
-        ),
-        types.Tool(
-            name="cooperage_run_script",
-            description=(
-                "Execute a Python script in the session's compute container. "
-                "Good for general computation, data wrangling, and post-processing. "
-                "Before using this for domain-specific work (generating data, running simulations, "
-                "specialized analysis), check cooperage_list_servers — a registered server may "
-                "already do it better. "
-                "Do NOT use this to read or base64-encode image files — use cooperage_workspace_read "
-                "with max_size=64 instead. "
-                "Keep stdout minimal — only print short confirmation messages, never large data. "
-                "Write large results to /workspace files; do not print them to stdout."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "session_id": {"type": "string"},
-                    "script": {"type": "string", "description": "Python script to execute"},
-                },
-                "required": ["session_id", "script"],
-            },
-        ),
-    ]
-
-
-# ── Tool dispatch ─────────────────────────────────────────────────────────────
-
-@app.call_tool()
-async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
-    try:
-        result = await _dispatch(name, arguments)
-        text = result if isinstance(result, str) else json.dumps(result, indent=2)
-        return [types.TextContent(type="text", text=text)]
-    except PermissionError as e:
-        return [types.TextContent(type="text", text=f"Permission denied: {e}")]
-    except Exception as e:
-        logger.exception("Error in tool %s", name)
-        return [types.TextContent(type="text", text=f"Error: {e}")]
-
-
-async def _dispatch(name: str, args: dict[str, Any]) -> Any:
-    auth = _auth_ctx.get()
-
-    if name == "cooperage_list_servers":
-        return _list_servers(auth)
-    if name == "cooperage_list_sessions":
-        return _list_sessions(auth)
-    if name == "cooperage_pull_server":
-        check_server_access(auth, args["server_name"])
-        return await _pull_server(args["server_name"])
-    if name == "cooperage_create_session":
-        return await _create_session(args.get("name"), auth)
-    if name == "cooperage_list_tools":
-        _check_session_tenant(args["session_id"], auth)
-        check_server_access(auth, args["server_name"])
-        return await _proxy_list_tools(args["session_id"], args["server_name"])
-    if name == "cooperage_call_tool":
-        _check_session_tenant(args["session_id"], auth)
-        check_server_access(auth, args["server_name"])
-        return await _proxy_call_tool(
-            args["session_id"],
-            args["server_name"],
-            args["tool_name"],
-            args.get("arguments", {}),
-        )
-    if name == "cooperage_end_session":
-        _check_session_tenant(args["session_id"], auth)
-        return await _end_session(args["session_id"])
-    if name == "cooperage_workspace_write":
-        _check_session_tenant(args["session_id"], auth)
-        return await _workspace_op(args["session_id"], "workspace_write", {
-            "path": args["path"], "content": args["content"],
+@tool(
+    "cooperage_list_servers",
+    description=(
+        "Discover what specialized servers are available in this Cooperage deployment. "
+        "Always call this first — registered servers may already provide domain-specific "
+        "tools (e.g. simulators, analyzers, data pipelines) that are faster and more "
+        "capable than writing a general script. "
+        "After listing, pull the servers you plan to use with cooperage_pull_server."
+    ),
+)
+def list_servers(auth: AuthContext, **kwargs) -> list[dict]:
+    orch = get_orchestrator()
+    servers = []
+    for s in registry.load():
+        if s.name in _BUILTIN_SERVER_NAMES:
+            continue
+        if auth.allowed_servers is not None and s.name not in auth.allowed_servers:
+            continue
+        servers.append({
+            "name": s.name,
+            "description": s.description,
+            "image": s.image,
+            "cached": orch.image_exists(s.image),
         })
-    if name == "cooperage_workspace_read":
-        _check_session_tenant(args["session_id"], auth)
-        op_args: dict[str, Any] = {"path": args["path"]}
-        if "max_size" in args:
-            op_args["max_size"] = args["max_size"]
-        return await _workspace_op(args["session_id"], "workspace_read", op_args)
-    if name == "cooperage_workspace_list":
-        _check_session_tenant(args["session_id"], auth)
-        return await _workspace_op(args["session_id"], "workspace_list", {})
-    if name == "cooperage_run_script":
-        _check_session_tenant(args["session_id"], auth)
-        return await _proxy_call_tool(args["session_id"], _COMPUTE_SERVER_NAME, "run_script", {"script": args["script"]})
-    if name == "cooperage_run_bash":
-        _check_session_tenant(args["session_id"], auth)
-        return await _proxy_call_tool(args["session_id"], _COMPUTE_SERVER_NAME, "run_bash", {"script": args["script"]})
-    raise ValueError(f"Unknown tool: {name!r}")
+    return servers
 
 
-def _check_session_tenant(session_id: str, auth: AuthContext) -> None:
-    """Ensure the session belongs to the authenticated tenant."""
-    session = sessions.get_session(session_id)
-    if session is None:
-        raise ValueError(f"Session {session_id!r} not found")
-    if auth.tenant_id != "default" and session.tenant_id != auth.tenant_id:
-        raise PermissionError(
-            f"Session {session_id[:8]}... belongs to a different tenant"
-        )
-
-
-# ── Tool implementations ─────────────────────────────────────────────────────
-
-def _list_sessions(auth: AuthContext) -> list[dict]:
-    # Tenant-scoped: only show sessions belonging to this tenant
+@tool(
+    "cooperage_list_sessions",
+    description="List all active sessions and their running containers.",
+)
+def list_sessions_tool(auth: AuthContext, **kwargs) -> list[dict]:
     tenant_filter = auth.tenant_id if auth.tenant_id != "default" else None
     all_sessions = sessions.list_sessions(tenant_id=tenant_filter)
     result = []
@@ -390,25 +188,18 @@ def _list_sessions(auth: AuthContext) -> list[dict]:
     return result
 
 
-def _list_servers(auth: AuthContext) -> list[dict]:
-    orch = get_orchestrator()
-    servers = []
-    for s in registry.load():
-        if s.name in _BUILTIN_SERVER_NAMES:
-            continue
-        # Filter by tenant RBAC
-        if auth.allowed_servers is not None and s.name not in auth.allowed_servers:
-            continue
-        servers.append({
-            "name": s.name,
-            "description": s.description,
-            "image": s.image,
-            "cached": orch.image_exists(s.image),
-        })
-    return servers
-
-
-async def _pull_server(server_name: str) -> dict:
+@tool(
+    "cooperage_pull_server",
+    description=(
+        "Pre-pull a server's Docker image. Only needed if the image is not yet "
+        "cached locally (check the 'cached' field from cooperage_list_servers). "
+        "Skip this if cached=true — the session pre-warms containers automatically."
+    ),
+    params={"server_name": {"type": "string"}},
+    required=["server_name"],
+    requires_server=True,
+)
+async def pull_server(server_name: str, **kwargs) -> dict:
     server_def = registry.get(server_name)
     if server_def is None:
         raise ValueError(f"No server named {server_name!r} in registry")
@@ -417,8 +208,17 @@ async def _pull_server(server_name: str) -> dict:
     return {"server": server_name, "image": server_def.image, "image_id": image_id}
 
 
-async def _create_session(name: str | None, auth: AuthContext) -> dict:
-    # Enforce session quota
+@tool(
+    "cooperage_create_session",
+    description=(
+        "Create a new Cooperage workspace session. "
+        "Returns a session_id. All containers started within this session "
+        "share a /workspace volume for data exchange."
+    ),
+    params={"name": {"type": "string", "description": "Optional human-readable name for the session"}},
+    required=[],
+)
+async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -> dict:
     if auth.max_sessions is not None:
         current = sessions.count_sessions_for_tenant(auth.tenant_id)
         if current >= auth.max_sessions:
@@ -443,6 +243,284 @@ async def _create_session(name: str | None, auth: AuthContext) -> dict:
     }
 
 
+@tool(
+    "cooperage_list_tools",
+    description=(
+        "List tools available on a registered MCP server. "
+        "Starts the container if it isn't already running."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "server_name": {"type": "string"},
+    },
+    required=["session_id", "server_name"],
+    requires_session=True,
+    requires_server=True,
+)
+async def proxy_list_tools(session_id: str, server_name: str, **kwargs) -> list[dict]:
+    info = await _ensure_container(session_id, server_name)
+    payload = {"jsonrpc": "2.0", "id": next(_rpc_id_counter), "method": "tools/list", "params": {}}
+    client = await _get_http_client()
+    resp = await client.post(f"{info.mcp_url}/mcp", json=payload, headers=_MCP_HEADERS, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("result", {}).get("tools", [])
+
+
+@tool(
+    "cooperage_call_tool",
+    description=(
+        "Call a tool on a registered MCP server within a session. "
+        "Starts the container if it isn't already running. "
+        "All containers in the same session share /workspace."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "server_name": {"type": "string"},
+        "tool_name": {"type": "string"},
+        "arguments": {"type": "object", "description": "Optional arguments to pass to the tool"},
+    },
+    required=["session_id", "server_name", "tool_name"],
+    requires_session=True,
+    requires_server=True,
+)
+async def call_tool_proxy(session_id: str, server_name: str, tool_name: str, arguments: dict | None = None, **kwargs):
+    return await _proxy_call_tool(session_id, server_name, tool_name, arguments or {})
+
+
+@tool(
+    "cooperage_end_session",
+    description="End a session: stop all containers and delete the shared workspace volume.",
+    params={"session_id": {"type": "string"}},
+    required=["session_id"],
+    requires_session=True,
+)
+async def end_session(session_id: str, **kwargs) -> dict:
+    for task in _warmup_tasks.pop(session_id, []):
+        task.cancel()
+    _warming.pop(session_id, None)
+    ok = sessions.end_session(session_id)
+    return {"ended": ok, "session_id": session_id}
+
+
+@tool(
+    "cooperage_workspace_write",
+    description=(
+        "Write a file directly to the session's /workspace volume. "
+        "Use this to persist plans, notes, intermediate results, or any text "
+        "the agent needs to survive context compression. "
+        "All servers in the session can read the file."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "path": {"type": "string", "description": "File path relative to /workspace (e.g. 'plan.md', 'results/output.json')"},
+        "content": {"type": "string", "description": "Text content to write"},
+    },
+    required=["session_id", "path", "content"],
+    requires_session=True,
+)
+async def workspace_write(session_id: str, path: str, content: str, **kwargs):
+    return await _workspace_op(session_id, "workspace_write", {"path": path, "content": content})
+
+
+@tool(
+    "cooperage_workspace_read",
+    description=(
+        "Read a file from the session's /workspace volume. "
+        "Binary files (images, etc.) are returned as base64-encoded JSON. "
+        "When embedding images in HTML, always set max_size=64 to get a thumbnail — "
+        "this keeps the base64 small enough to embed without hitting size limits."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "path": {"type": "string", "description": "File path relative to /workspace"},
+        "max_size": {"type": "integer", "description": "Optional — for images: resize longest edge to this many pixels before returning. Use 64 when embedding in HTML. Omit for full resolution."},
+    },
+    required=["session_id", "path"],
+    requires_session=True,
+)
+async def workspace_read(session_id: str, path: str, max_size: int | None = None, **kwargs):
+    op_args: dict[str, Any] = {"path": path}
+    if max_size is not None:
+        op_args["max_size"] = max_size
+    return await _workspace_op(session_id, "workspace_read", op_args)
+
+
+@tool(
+    "cooperage_workspace_list",
+    description="List all files currently in the session's /workspace volume.",
+    params={"session_id": {"type": "string"}},
+    required=["session_id"],
+    requires_session=True,
+)
+async def workspace_list(session_id: str, **kwargs):
+    return await _workspace_op(session_id, "workspace_list", {})
+
+
+@tool(
+    "cooperage_run_bash",
+    description=(
+        "Execute a bash script in the session's compute container. "
+        "The /workspace directory is available as $WORKSPACE. "
+        "Useful for file manipulation, running CLI tools, or chaining commands. "
+        "Do NOT use this to read files from /workspace — use cooperage_workspace_read "
+        "instead (handles binary files and base64 encoding automatically). "
+        "Do NOT use this for domain-specific work like image analysis — "
+        "use cooperage_call_tool with a registered server instead."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "script": {"type": "string", "description": "Bash script to execute"},
+    },
+    required=["session_id", "script"],
+    requires_session=True,
+)
+async def run_bash(session_id: str, script: str, **kwargs):
+    return await _proxy_call_tool(session_id, _COMPUTE_SERVER_NAME, "run_bash", {"script": script})
+
+
+@tool(
+    "cooperage_run_script",
+    description=(
+        "Execute a Python script in the session's compute container. "
+        "Good for general computation, data wrangling, and post-processing. "
+        "Before using this for domain-specific work (generating data, running simulations, "
+        "specialized analysis), check cooperage_list_servers — a registered server may "
+        "already do it better. "
+        "Do NOT use this to read or base64-encode image files — use cooperage_workspace_read "
+        "with max_size=64 instead. "
+        "Keep stdout minimal — only print short confirmation messages, never large data. "
+        "Write large results to /workspace files; do not print them to stdout."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "script": {"type": "string", "description": "Python script to execute"},
+    },
+    required=["session_id", "script"],
+    requires_session=True,
+)
+async def run_script(session_id: str, script: str, **kwargs):
+    return await _proxy_call_tool(session_id, _COMPUTE_SERVER_NAME, "run_script", {"script": script})
+
+
+# ── MCP handlers (wired to the decorator registry) ───────────────────────────
+
+@app.list_tools()
+async def handle_list_tools() -> list[types.Tool]:
+    return [
+        types.Tool(name=name, description=t["description"], inputSchema=t["schema"])
+        for name, t in _tools.items()
+    ]
+
+
+@app.call_tool()
+async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
+    try:
+        result = await _dispatch(name, arguments)
+        text = result if isinstance(result, str) else json.dumps(result, indent=2)
+        return [types.TextContent(type="text", text=text)]
+    except PermissionError as e:
+        return [types.TextContent(type="text", text=f"Permission denied: {e}")]
+    except Exception as e:
+        logger.exception("Error in tool %s", name)
+        return [types.TextContent(type="text", text=f"Error: {e}")]
+
+
+async def _dispatch(name: str, args: dict[str, Any]) -> Any:
+    entry = _tools.get(name)
+    if entry is None:
+        raise ValueError(f"Unknown tool: {name!r}")
+
+    auth = _auth_ctx.get()
+
+    # Auto-check session tenant ownership
+    if entry["requires_session"] and "session_id" in args:
+        _check_session_tenant(args["session_id"], auth)
+
+    # Auto-check server RBAC
+    if entry["requires_server"] and "server_name" in args:
+        check_server_access(auth, args["server_name"])
+
+    handler = entry["handler"]
+    # Inject auth for handlers that accept it
+    if asyncio.iscoroutinefunction(handler):
+        return await handler(auth=auth, **args)
+    return handler(auth=auth, **args)
+
+
+def _check_session_tenant(session_id: str, auth: AuthContext) -> None:
+    """Ensure the session belongs to the authenticated tenant."""
+    session = sessions.get_session(session_id)
+    if session is None:
+        raise ValueError(f"Session {session_id!r} not found")
+    if auth.tenant_id != "default" and session.tenant_id != auth.tenant_id:
+        raise PermissionError(
+            f"Session {session_id[:8]}... belongs to a different tenant"
+        )
+
+
+# ── MCP Resources ────────────────────────────────────────────────────────────
+
+@app.list_resources()
+async def handle_list_resources() -> list[types.Resource]:
+    auth = _auth_ctx.get()
+    resources = [
+        types.Resource(
+            uri="cooperage://registry/servers",
+            name="Server Registry",
+            description="All registered MCP servers and their images",
+            mimeType="application/json",
+        ),
+        types.Resource(
+            uri="cooperage://sessions",
+            name="Active Sessions",
+            description="All active sessions with container status",
+            mimeType="application/json",
+        ),
+    ]
+
+    # Add per-session workspace listings
+    tenant_filter = auth.tenant_id if auth.tenant_id != "default" else None
+    for s in sessions.list_sessions(tenant_id=tenant_filter):
+        label = s.name or s.id[:8]
+        resources.append(types.Resource(
+            uri=f"cooperage://sessions/{s.id}/workspace",
+            name=f"Workspace: {label}",
+            description=f"Files in the /workspace volume for session {label}",
+            mimeType="application/json",
+        ))
+
+    return resources
+
+
+@app.read_resource()
+async def handle_read_resource(uri) -> str:
+    uri_str = str(uri)
+    auth = _auth_ctx.get()
+
+    if uri_str == "cooperage://registry/servers":
+        return json.dumps(list_servers(auth=auth), indent=2)
+
+    if uri_str == "cooperage://sessions":
+        return json.dumps(list_sessions_tool(auth=auth), indent=2)
+
+    # cooperage://sessions/{session_id}/workspace
+    if uri_str.startswith("cooperage://sessions/") and uri_str.endswith("/workspace"):
+        session_id = uri_str.split("/")[3]
+        _check_session_tenant(session_id, auth)
+        try:
+            result = await _workspace_op(session_id, "workspace_list", {})
+            if isinstance(result, str):
+                return result
+            return json.dumps(result, indent=2)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    raise ValueError(f"Unknown resource: {uri_str}")
+
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
+
 async def _warmup_builtin(session_id: str, server_def: ServerDef) -> None:
     try:
         await asyncio.to_thread(sessions.get_or_start_container, session_id, server_def)
@@ -457,20 +535,11 @@ async def _warmup_builtin(session_id: str, server_def: ServerDef) -> None:
             del _warming[session_id]
 
 
-async def _end_session(session_id: str) -> dict:
-    for task in _warmup_tasks.pop(session_id, []):
-        task.cancel()
-    _warming.pop(session_id, None)
-    ok = sessions.end_session(session_id)
-    return {"ended": ok, "session_id": session_id}
-
-
 async def _ensure_container(session_id: str, server_name: str) -> ContainerInfo:
     server_def = registry.get(server_name)
     if server_def is None:
         raise ValueError(f"No server named {server_name!r} in registry")
     info = await asyncio.to_thread(sessions.get_or_start_container, session_id, server_def)
-    # Record activity for idle timeout tracking
     sessions.touch_container(session_id, server_name)
     sessions.touch_session(session_id)
     return info
@@ -484,16 +553,6 @@ async def _workspace_op(session_id: str, tool_name: str, arguments: dict) -> Any
 # ── MCP proxy ─────────────────────────────────────────────────────────────────
 
 _MCP_HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
-
-
-async def _proxy_list_tools(session_id: str, server_name: str) -> list[dict]:
-    info = await _ensure_container(session_id, server_name)
-    payload = {"jsonrpc": "2.0", "id": next(_rpc_id_counter), "method": "tools/list", "params": {}}
-    client = await _get_http_client()
-    resp = await client.post(f"{info.mcp_url}/mcp", json=payload, headers=_MCP_HEADERS, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-    return data.get("result", {}).get("tools", [])
 
 
 async def _proxy_call_tool(
@@ -549,7 +608,6 @@ async def _handle_upload(scope, receive, send) -> None:
     import base64
     from urllib.parse import parse_qs, unquote
 
-    # Auth for upload endpoint
     try:
         headers = {k.decode(): v.decode() for k, v in scope.get("headers", [])}
         auth = authenticate_request(headers)
@@ -565,7 +623,6 @@ async def _handle_upload(scope, receive, send) -> None:
 
     session_id = parts[1]
 
-    # Check tenant owns this session
     try:
         _check_session_tenant(session_id, auth)
     except (PermissionError, ValueError) as e:
@@ -597,7 +654,7 @@ async def _handle_upload(scope, receive, send) -> None:
         await _send_json_response(send, 500, {"error": str(e)})
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ── Entry points ──────────────────────────────────────────────────────────────
 
 async def run_stdio() -> None:
     """Run the gateway over stdio (for Claude Desktop / MCP CLI).
