@@ -1,61 +1,55 @@
-# Cooperage
+<p align="center">
+  <img src="assets/logo.png" alt="Cooperage" width="420">
+</p>
 
-**Where AI tools work together.**
+---
 
-MCP makes it easy to give LLMs tools. Cooperage makes those tools scalable — each tool call runs in an isolated Docker container with dedicated compute and a shared workspace volume. Spin up, run, tear down. No infra to manage.
+MCP makes it easy to give LLMs tools. Cooperage makes those tools *scalable* — each tool call runs in an isolated container with dedicated compute and a shared workspace volume. No infra to manage. Just register a Docker image and let your LLM orchestrate it.
 
-## The problem
+## Why this exists
 
-Writing an MCP server is easy. Deploying it somewhere your LLM can actually use it for real compute — stateful runs, large datasets, simulation pipelines — is hard. Cooperage is the missing layer.
+Writing an MCP server is easy. Deploying it somewhere an LLM can actually *use* it — for stateful runs, large datasets, multi-step pipelines — is not. Cooperage is the missing layer between "I have tools" and "my LLM can run them at scale on my own infrastructure."
 
-## How it works
+The key thing that makes Cooperage different: **multiple containers per session, one shared `/workspace` volume.** A generator writes a file, an analyzer reads it, a report writer summarizes it — all orchestrated by the LLM, all passing data through the same volume. No other platform does this.
+
+## Architecture
 
 ```
 LLM (Claude Desktop / API)
-        │  MCP (stdio)
-        ▼
+       │  MCP (stdio or HTTP)
+       ▼
 ┌─────────────────────────┐
-│    Cooperage Gateway      │  ← one MCP server the LLM connects to
+│    Cooperage Gateway    │  ← single MCP server the LLM talks to
 └────────────┬────────────┘
              │  HTTP JSON-RPC
      ┌───────┴───────┐
      ▼               ▼
-[Container A]   [Container B]   ← ephemeral Docker containers
- your MCP server  your MCP server  spun up on demand, per session
+[Container A]   [Container B]     ephemeral containers,
+ your MCP server  your MCP server   spun up per session
      └───────┬───────┘
-      shared /workspace volume   ← data persists across calls in session
+      shared /workspace volume    data persists across calls
 ```
 
 ## Quick start
 
-### Prerequisites
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/getting-started/installation/)
-- Docker Desktop running
-
-### 1. Install
+**Prerequisites:** Python 3.11+, [uv](https://docs.astral.sh/uv/getting-started/installation/), Docker Desktop running.
 
 ```bash
-git clone <repo> && cd cooperage
+# Install
+git clone https://github.com/cooperage-io/cooperage.git && cd cooperage
 uv sync
-```
 
-### 2. Build the example server
-
-```bash
+# Build the example server
 docker buildx build --load -t cooperage-image-analyzer:latest example-servers/image-analyzer/
-```
 
-### 3. Register it
-
-```bash
+# Register it
 uv run cooperage register \
   --name image-analyzer \
   --image cooperage-image-analyzer:latest \
   --description "Analyze images and data in /workspace using numpy/PIL"
 ```
 
-### 4. Add to Claude Desktop
+### Connect to Claude Desktop
 
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -70,230 +64,163 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop. You'll see a hammer icon — Cooperage is connected.
+Restart Claude Desktop. You should see the hammer icon — Cooperage is connected.
 
-### 5. Pre-warm (recommended before first use)
+### HTTP mode (for programmatic access)
 
-In Claude Desktop, ask:
-> *"Pull the image-analyzer server so it's ready to use."*
+```bash
+uv run cooperage start --sse
+```
 
-Claude will call `cooperage_pull_server("image-analyzer")` to ensure the image is cached locally.
+This starts the gateway on `http://localhost:8080/mcp` as a Streamable HTTP MCP server.
 
----
+## What the LLM sees
 
-## Gateway tools
+These are the tools exposed to the LLM via MCP:
 
-The LLM sees these tools:
-
-| Tool | Description |
+| Tool | What it does |
 |------|-------------|
-| `cooperage_list_servers` | List registered servers. Shows whether each image is cached locally. |
-| `cooperage_pull_server(server_name)` | Pre-pull a server image. Call before creating a session to avoid cold-start latency. |
-| `cooperage_create_session(name?)` | Create a workspace session. Returns `session_id`. All containers in this session share `/workspace`. |
-| `cooperage_list_tools(session_id, server_name)` | List tools exposed by a server. Starts the container if needed. |
-| `cooperage_call_tool(session_id, server_name, tool_name, arguments)` | Invoke a tool. Starts the container if needed. |
-| `cooperage_end_session(session_id)` | Tear down all containers and delete the shared workspace volume. |
+| `cooperage_list_servers` | List available servers and whether their images are cached. |
+| `cooperage_pull_server` | Pre-pull a server image to avoid cold-start latency. |
+| `cooperage_create_session` | Create a workspace session. Returns a `session_id`. |
+| `cooperage_list_tools` | List tools on a server. Starts the container if needed. |
+| `cooperage_call_tool` | Call a tool on a server. Starts the container if needed. |
+| `cooperage_workspace_read` | Read a file from `/workspace`. Handles binary + base64. |
+| `cooperage_workspace_write` | Write a file to `/workspace`. |
+| `cooperage_workspace_list` | List files in `/workspace`. |
+| `cooperage_run_script` | Run a Python script in the compute container. |
+| `cooperage_run_bash` | Run a bash script in the compute container. |
+| `cooperage_end_session` | Tear down containers and delete the workspace volume. |
 
----
+The gateway also exposes [MCP Resources](https://modelcontextprotocol.io/docs/concepts/resources) for reading registry and session state programmatically.
+
+## Multi-container pipelines
+
+This is the core use case. Containers in the same session share `/workspace`:
+
+```
+cooperage_call_tool(session, "scene-generator", "generate", {type: "urban"})
+  → container A starts, writes /workspace/scene.png
+
+cooperage_call_tool(session, "image-analyzer", "analyze", {path: "scene.png"})
+  → container B starts, reads /workspace/scene.png
+
+cooperage_workspace_read(session, "analysis.json")
+  → LLM reads the result directly
+```
+
+Two containers. One session. One shared volume. Your proprietary tools stay in your Docker images, on your infrastructure.
+
+## Writing your own server
+
+Package any MCP server as a Docker image:
+
+1. Expose MCP on port `8000` (configurable at registration)
+2. Use `StreamableHTTPSessionManager` with `json_response=True, stateless=True`
+3. Read/write `/workspace` for cross-container data sharing
+
+See [example-servers/image-analyzer/](example-servers/image-analyzer/) for a working example.
+
+```bash
+uv run cooperage register \
+  --name my-server \
+  --image my-org/my-server:latest \
+  --description "Does the thing" \
+  --repo-url https://github.com/my-org/my-server  # optional — lets the LLM clone and debug
+```
 
 ## Kubernetes backend
 
-Cooperage ships with a Kubernetes orchestrator backend that is a drop-in replacement for the default Docker backend. Containers run as Pods with NodePort Services; the shared workspace is a `hostPath` volume (works on Docker Desktop K8s out of the box; use a PVC with a ReadWriteMany StorageClass for multi-node clusters).
+Cooperage has a drop-in Kubernetes backend. Containers run as Pods with NodePort Services; the shared workspace uses `hostPath` volumes (or a ReadWriteMany PVC on multi-node clusters).
 
-### Setup
-
-**1. Enable Kubernetes in Docker Desktop** — Settings → Kubernetes → Enable Kubernetes.
-
-**2. Bootstrap the namespace:**
 ```bash
+# Bootstrap the namespace
 COOPERAGE_ORCHESTRATOR=kubernetes uv run cooperage init-k8s
-```
 
-**3. Start the gateway with the K8s backend:**
-```bash
+# Start the gateway
 COOPERAGE_ORCHESTRATOR=kubernetes uv run cooperage start
 ```
 
-Or add `COOPERAGE_ORCHESTRATOR=kubernetes` to `.env` to make it the default.
+The tools and LLM config are identical — only the backend changes.
 
-**4. Verify pods and services during a session:**
+## Web UI
+
+Cooperage ships with a Streamlit-based dashboard for monitoring sessions, viewing container status, and browsing workspace files.
+
 ```bash
-kubectl get pods -n cooperage
-kubectl get svc -n cooperage
+uv run cooperage ui
 ```
 
-**5. Cleanup:**
-```bash
-kubectl delete namespace cooperage
-```
+Supports file preview (images, HTML, CSV, PDF) and file upload. When SSO is configured, the UI shows a login button automatically.
 
-The gateway tools and Claude Desktop config are identical — only the backend changes.
+## Multi-tenant / enterprise mode
 
----
+By default Cooperage runs in local mode — no auth, no quotas, everything works for a single user. For shared deployments, set `COOPERAGE_AUTH_ENABLED=true`.
 
-## CLI reference
+**Authentication** (checked in order):
 
-```
-cooperage register      Register a Docker image as an MCP server
-cooperage list-servers  List registered servers
-cooperage deregister    Remove a server from the registry
-cooperage sessions      List active sessions
-cooperage start         Start the gateway (stdio by default, --sse for HTTP)
-cooperage init-k8s      Bootstrap the Cooperage namespace in Kubernetes
-```
+1. **API keys** — static keys mapped to tenants, with per-tenant RBAC and session quotas.
+2. **HS256 JWT** — signed tokens with a `tenant_id` claim.
+3. **OIDC / SSO** — RS256 tokens validated via JWKS from your identity provider (Okta, Azure AD, Auth0, etc.). The UI supports PKCE-based login — no client secret needed.
 
----
+**Other enterprise features:**
+- Per-container CPU and memory limits (default: 1 CPU, 512 MB)
+- Per-session network isolation (Docker bridge networks / K8s NetworkPolicy)
+- Private image registry authentication
+- Session quotas per tenant
+- Container idle timeout with automatic cleanup
+- Session TTL extension on activity
 
-## Environment variables
+## Configuration
 
-See [`.env.example`](.env.example). Key settings:
+All settings use the `COOPERAGE_` prefix and can go in a `.env` file. See [`.env.example`](.env.example).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `COOPERAGE_SESSION_TTL_SECONDS` | `1800` | Session auto-expiry (30 min) |
+| `COOPERAGE_ORCHESTRATOR` | `docker` | `docker` or `kubernetes` |
+| `COOPERAGE_SESSION_TTL_SECONDS` | `1800` | Session auto-expiry |
+| `COOPERAGE_CONTAINER_IDLE_TIMEOUT` | `600` | Stop idle containers after N seconds |
 | `COOPERAGE_CONTAINER_STARTUP_TIMEOUT` | `30` | Seconds to wait for container readiness |
-| `COOPERAGE_CONTAINER_PORT_RANGE_START` | `9000` | Host port range for containers (Docker) |
-| `COOPERAGE_CONTAINER_PORT_RANGE_END` | `9999` | Host port range for containers (Docker) |
-| `COOPERAGE_ORCHESTRATOR` | `docker` | Orchestrator backend: `docker` or `kubernetes` |
+| `COOPERAGE_DEFAULT_CPU_LIMIT` | `1.0` | CPU limit per container |
+| `COOPERAGE_DEFAULT_MEMORY_LIMIT` | `512m` | Memory limit per container |
+| `COOPERAGE_NETWORK_ISOLATION` | `true` | Per-session network isolation |
+| `COOPERAGE_AUTH_ENABLED` | `false` | Enable authentication |
+| `COOPERAGE_API_KEYS_PATH` | — | Path to API keys JSON |
+| `COOPERAGE_JWT_SECRET` | — | HS256 secret |
+| `COOPERAGE_OIDC_ISSUER_URL` | — | OIDC issuer (e.g. Azure AD) |
+| `COOPERAGE_OIDC_AUDIENCE` | — | Expected `aud` claim |
+| `COOPERAGE_OIDC_CLIENT_ID` | — | OAuth2 client ID (enables SSO in UI) |
+| `COOPERAGE_UI_URL` | — | UI base URL (shown to users after session creation) |
 | `COOPERAGE_K8S_NAMESPACE` | `cooperage` | Kubernetes namespace |
-| `COOPERAGE_K8S_NODE_PORT_RANGE_START` | `30000` | NodePort range start (K8s) |
-| `COOPERAGE_K8S_NODE_PORT_RANGE_END` | `32767` | NodePort range end (K8s) |
-| `COOPERAGE_AUTH_ENABLED` | `false` | Enable API key / JWT authentication |
-| `COOPERAGE_API_KEYS_PATH` | — | Path to API keys JSON file |
-| `COOPERAGE_JWT_SECRET` | — | HS256 secret for JWT validation |
-| `COOPERAGE_DEFAULT_CPU_LIMIT` | `1.0` | Default CPU limit for containers |
-| `COOPERAGE_DEFAULT_MEMORY_LIMIT` | `512m` | Default memory limit for containers |
-| `COOPERAGE_NETWORK_ISOLATION` | `true` | Create per-session isolated networks |
-| `COOPERAGE_OIDC_ISSUER_URL` | — | OIDC issuer URL (e.g. `https://login.microsoftonline.com/{tenant}/v2.0`) |
-| `COOPERAGE_OIDC_AUDIENCE` | — | Expected `aud` claim (your app's client ID) |
-| `COOPERAGE_OIDC_TENANT_CLAIM` | `tid` | JWT claim to use as tenant_id |
-| `COOPERAGE_OIDC_CLIENT_ID` | — | OAuth2 client ID (enables SSO in the UI) |
-| `COOPERAGE_OIDC_SCOPES` | `openid profile email` | OAuth2 scopes |
 
----
+## CLI
 
-## Enterprise / multi-tenant mode
-
-By default Cooperage runs in **local demo mode** — no auth, no tenant scoping, no quotas. Everything works out of the box for a single user.
-
-For shared or on-prem deployments, set `COOPERAGE_AUTH_ENABLED=true` to enable multi-tenancy:
-
-### Authentication
-
-Cooperage supports three auth methods (checked in order):
-
-1. **API keys** — static keys mapped to tenants. Set `COOPERAGE_API_KEYS_PATH` to a JSON file:
-
-```json
-[
-  {
-    "key": "sk-cooperage-abc123...",
-    "tenant_id": "acme-corp",
-    "allowed_servers": ["sim-runner", "image-analyzer"],
-    "max_sessions": 10
-  }
-]
+```
+cooperage register      Register a Docker image as an MCP server
+cooperage deregister    Remove a server from the registry
+cooperage list-servers  List registered servers
+cooperage sessions      List active sessions
+cooperage start         Start the gateway (stdio default, --sse for HTTP)
+cooperage init-k8s      Bootstrap the Cooperage K8s namespace
+cooperage ui            Launch the web dashboard
 ```
 
-2. **HS256 JWT** — signed tokens with a `tenant_id` claim. Set `COOPERAGE_JWT_SECRET` to your shared secret.
+## Comparison
 
-3. **OIDC / SSO** — validate RS256 tokens from your identity provider (Okta, Azure AD, Auth0, etc.). Set `COOPERAGE_OIDC_ISSUER_URL` to your OIDC issuer. The gateway fetches the JWKS from the provider's discovery endpoint and validates tokens automatically. The tenant is extracted from the claim specified by `COOPERAGE_OIDC_TENANT_CLAIM` (default: `tid` for Azure AD, use `sub` for most others).
+| | Containers per session | Shared workspace | Infrastructure | Image source |
+|-|------------------------|-----------------|----------------|--------------|
+| **Cooperage** | Multiple (one per server) | Shared `/workspace` volume | Docker or Kubernetes | Any registry |
+| **Docker MCP Toolkit** | Multiple | Each container isolated | Docker Desktop only | Docker catalog |
+| **AWS Bedrock AgentCore** | One (tools colocated) | Partial — 1 GB, preview | AWS only | ECR |
+| **Google ADK + Vertex** | No container orchestration | Memory state only | GCP only | — |
+| **Azure AI Foundry** | No container orchestration | Thread state only | Azure only | — |
 
-Requests must include `Authorization: Bearer <key-or-jwt>`. When auth is enabled, each tenant can only see and manage their own sessions.
-
-### SSO setup (OIDC)
-
-To enable SSO login in the Cooperage UI:
-
-1. Register an OAuth2 application in your identity provider (Okta, Azure AD, etc.)
-2. Set the redirect URI to your Streamlit app URL (default: `http://localhost:8501`)
-3. Configure the gateway:
+## Tests
 
 ```bash
-COOPERAGE_AUTH_ENABLED=true
-COOPERAGE_OIDC_ISSUER_URL=https://login.microsoftonline.com/{tenant-id}/v2.0
-COOPERAGE_OIDC_AUDIENCE=your-client-id
-COOPERAGE_OIDC_CLIENT_ID=your-client-id
+uv run pytest -v    # 156 tests, no Docker daemon needed
 ```
 
-The UI will automatically show a "Sign in with SSO" button that redirects to your identity provider. The login flow uses PKCE (Proof Key for Code Exchange) — no client secret needed.
+## License
 
-### Resource limits
-
-Every container gets CPU and memory limits (defaults: 1 CPU, 512 MB). Override globally with `COOPERAGE_DEFAULT_CPU_LIMIT` / `COOPERAGE_DEFAULT_MEMORY_LIMIT`, or per-server in the registry:
-
-```json
-{
-  "name": "heavy-solver",
-  "image": "solver:latest",
-  "resources": { "cpu": "4.0", "memory": "4g" }
-}
-```
-
-### Network isolation
-
-Each session gets its own Docker bridge network (or Kubernetes NetworkPolicy). Containers in different sessions cannot communicate. Disable with `COOPERAGE_NETWORK_ISOLATION=false`.
-
-### Private image registries
-
-Servers can specify registry credentials for pulling from private registries. On Docker, Cooperage logs in before pulling. On Kubernetes, it creates an `imagePullSecret` automatically.
-
----
-
-## Writing your own MCP server
-
-Package any MCP server as a Docker image. Requirements:
-
-1. Expose an MCP server on port `8000` (configurable via `--port` at registration)
-2. Use `StreamableHTTPSessionManager` with `json_response=True, stateless=True` so the gateway can POST to `/mcp`
-3. Optionally read/write `/workspace` — it's a shared volume across your session
-
-See [`example-servers/image-analyzer/`](example-servers/image-analyzer/) for a working example.
-
-```bash
-cooperage register \
-  --name my-server \
-  --image my-org/my-mcp-server:latest \
-  --description "Does the thing" \
-  --port 8000
-```
-
----
-
-## Landscape
-
-There are a handful of platforms that touch this space. Here's an honest read on how they compare.
-
-| | Containers per session | Shared workspace across servers | Infrastructure | Image source |
-|-|------------------------|--------------------------------|----------------|--------------|
-| **Cooperage** | Multiple (one per server) | ✅ Shared `/workspace` volume | Local Docker or Kubernetes | Any registry |
-| **Docker MCP Toolkit** | Multiple (one per server) | ❌ Each container isolated | Local Docker Desktop only | Docker's curated catalog |
-| **AWS Bedrock AgentCore** | One per session (agent + tools colocated) | Partial — `/mnt/workspace` inside one container, preview, 1 GB cap | AWS only | ECR |
-| **Google ADK + Vertex AI Agent Engine** | No container orchestration for MCP servers (recommends Cloud Run separately) | ❌ Memory-based state only | GCP only | — |
-| **Azure AI Foundry** | No container orchestration — connects to externally-hosted MCP endpoints | ❌ Thread state only | Azure only | — |
-| **LangGraph Platform** | No — framework only, MCP servers hosted separately | ❌ In-memory/DB graph state | Local or SaaS | — |
-| **Composio** | No — managed SaaS integrations, no user container control | ❌ Auth state only | SaaS only | — |
-
-**The column that matters most for data pipelines:**
-
-No other platform runs multiple MCP server containers within the same session and mounts them to a shared volume. AWS AgentCore is closest — it has per-session filesystem storage — but it colocates all tools inside a single container, runs only on AWS, and the feature is in preview with a 1 GB cap. Every cloud platform (Azure, Google, Composio) treats MCP servers as remote HTTP endpoints; container lifecycle is not their problem.
-
-```
-cooperage_call_tool(session_id, "synthetic-image-generator", "generate_scene", {scene_type: "urban"})
-  → container A starts, writes /workspace/scene.png
-
-cooperage_call_tool(session_id, "image-analyzer", "analyze_scene", {image_path: "scene.png"})
-  → container B starts, reads /workspace/scene.png from the same volume
-```
-
-Two containers. One session. One shared volume. This is what enables LLM-orchestrated multi-stage pipelines — a generator, a solver, an analyzer, a report writer — each in its own isolated environment, passing data through the workspace. If your team has proprietary tools already packaged as Docker images, Cooperage is the layer that lets an LLM orchestrate them on your own infrastructure.
-
----
-
-## Running tests
-
-```bash
-uv run pytest -v
-```
-
-96 tests, no Docker daemon or cluster required (all mocked).
+[MIT](LICENSE)
