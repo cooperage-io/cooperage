@@ -37,6 +37,14 @@ class Orchestrator(ABC):
     @abstractmethod
     def get_container_logs(self, container_id: str, tail: int = 50) -> str: ...
 
+    def create_session_network(self, session: Session) -> None:
+        """Create an isolated network for a session. Override in subclasses."""
+        pass
+
+    def remove_session_network(self, session: Session) -> None:
+        """Remove a session's isolated network. Override in subclasses."""
+        pass
+
     def wait_until_ready(self, info: ContainerInfo, timeout: int | None = None) -> bool:
         """Poll the container's MCP endpoint until it responds or timeout."""
         from cooperage.core.config import settings
@@ -62,3 +70,10 @@ class Orchestrator(ABC):
                 if s.connect_ex(("localhost", port)) != 0:
                     return port
         raise RuntimeError(f"No free ports available in range {start}-{end}")
+
+    def _resolve_resource_limits(self, server_def: ServerDef) -> tuple[str, str]:
+        """Return (cpu, memory) limits — server-level overrides > global defaults."""
+        from cooperage.core.config import settings
+        cpu = server_def.resources.cpu or settings.default_cpu_limit
+        memory = server_def.resources.memory or settings.default_memory_limit
+        return cpu, memory

@@ -16,6 +16,7 @@ All heavy lifting is delegated to the session manager and orchestrator.
 """
 
 import asyncio
+import contextvars
 import itertools
 import json
 import logging
@@ -29,11 +30,17 @@ from mcp import types
 import cooperage.registry.registry as registry
 import cooperage.session.manager as sessions
 from cooperage.orchestrator import get_orchestrator
+from cooperage.core.auth import AuthContext, authenticate_request, check_server_access, get_oidc_config, load_api_keys
 from cooperage.core.models import ContainerInfo, ServerDef
 
 logger = logging.getLogger(__name__)
 
 app = Server("cooperage-gateway")
+
+# Per-request auth context (set by ASGI middleware, default for stdio)
+_auth_ctx: contextvars.ContextVar[AuthContext] = contextvars.ContextVar(
+    "_auth_ctx", default=AuthContext(tenant_id="default"),
+)
 
 # Incrementing JSON-RPC request IDs
 _rpc_id_counter = itertools.count(1)
@@ -273,32 +280,38 @@ async def list_tools() -> list[types.Tool]:
 
 # ── Tool dispatch ─────────────────────────────────────────────────────────────
 
-_TOOL_HANDLERS: dict[str, Any] = {}  # populated after handler functions are defined
-
-
 @app.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
     try:
         result = await _dispatch(name, arguments)
         text = result if isinstance(result, str) else json.dumps(result, indent=2)
         return [types.TextContent(type="text", text=text)]
+    except PermissionError as e:
+        return [types.TextContent(type="text", text=f"Permission denied: {e}")]
     except Exception as e:
         logger.exception("Error in tool %s", name)
         return [types.TextContent(type="text", text=f"Error: {e}")]
 
 
 async def _dispatch(name: str, args: dict[str, Any]) -> Any:
+    auth = _auth_ctx.get()
+
     if name == "cooperage_list_servers":
-        return _list_servers()
+        return _list_servers(auth)
     if name == "cooperage_list_sessions":
-        return _list_sessions()
+        return _list_sessions(auth)
     if name == "cooperage_pull_server":
+        check_server_access(auth, args["server_name"])
         return await _pull_server(args["server_name"])
     if name == "cooperage_create_session":
-        return await _create_session(args.get("name"))
+        return await _create_session(args.get("name"), auth)
     if name == "cooperage_list_tools":
+        _check_session_tenant(args["session_id"], auth)
+        check_server_access(auth, args["server_name"])
         return await _proxy_list_tools(args["session_id"], args["server_name"])
     if name == "cooperage_call_tool":
+        _check_session_tenant(args["session_id"], auth)
+        check_server_access(auth, args["server_name"])
         return await _proxy_call_tool(
             args["session_id"],
             args["server_name"],
@@ -306,29 +319,48 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
             args.get("arguments", {}),
         )
     if name == "cooperage_end_session":
+        _check_session_tenant(args["session_id"], auth)
         return await _end_session(args["session_id"])
     if name == "cooperage_workspace_write":
+        _check_session_tenant(args["session_id"], auth)
         return await _workspace_op(args["session_id"], "workspace_write", {
             "path": args["path"], "content": args["content"],
         })
     if name == "cooperage_workspace_read":
+        _check_session_tenant(args["session_id"], auth)
         op_args: dict[str, Any] = {"path": args["path"]}
         if "max_size" in args:
             op_args["max_size"] = args["max_size"]
         return await _workspace_op(args["session_id"], "workspace_read", op_args)
     if name == "cooperage_workspace_list":
+        _check_session_tenant(args["session_id"], auth)
         return await _workspace_op(args["session_id"], "workspace_list", {})
     if name == "cooperage_run_script":
+        _check_session_tenant(args["session_id"], auth)
         return await _proxy_call_tool(args["session_id"], _COMPUTE_SERVER_NAME, "run_script", {"script": args["script"]})
     if name == "cooperage_run_bash":
+        _check_session_tenant(args["session_id"], auth)
         return await _proxy_call_tool(args["session_id"], _COMPUTE_SERVER_NAME, "run_bash", {"script": args["script"]})
     raise ValueError(f"Unknown tool: {name!r}")
 
 
+def _check_session_tenant(session_id: str, auth: AuthContext) -> None:
+    """Ensure the session belongs to the authenticated tenant."""
+    session = sessions.get_session(session_id)
+    if session is None:
+        raise ValueError(f"Session {session_id!r} not found")
+    if auth.tenant_id != "default" and session.tenant_id != auth.tenant_id:
+        raise PermissionError(
+            f"Session {session_id[:8]}... belongs to a different tenant"
+        )
+
+
 # ── Tool implementations ─────────────────────────────────────────────────────
 
-def _list_sessions() -> list[dict]:
-    all_sessions = sessions.list_sessions()
+def _list_sessions(auth: AuthContext) -> list[dict]:
+    # Tenant-scoped: only show sessions belonging to this tenant
+    tenant_filter = auth.tenant_id if auth.tenant_id != "default" else None
+    all_sessions = sessions.list_sessions(tenant_id=tenant_filter)
     result = []
     for s in all_sessions:
         containers = []
@@ -351,24 +383,29 @@ def _list_sessions() -> list[dict]:
         result.append({
             "session_id": s.id,
             "name": s.name,
+            "tenant_id": s.tenant_id,
             "expires_at": s.expires_at.isoformat(),
             "containers": containers,
         })
     return result
 
 
-def _list_servers() -> list[dict]:
+def _list_servers(auth: AuthContext) -> list[dict]:
     orch = get_orchestrator()
-    return [
-        {
+    servers = []
+    for s in registry.load():
+        if s.name in _BUILTIN_SERVER_NAMES:
+            continue
+        # Filter by tenant RBAC
+        if auth.allowed_servers is not None and s.name not in auth.allowed_servers:
+            continue
+        servers.append({
             "name": s.name,
             "description": s.description,
             "image": s.image,
             "cached": orch.image_exists(s.image),
-        }
-        for s in registry.load()
-        if s.name not in _BUILTIN_SERVER_NAMES
-    ]
+        })
+    return servers
 
 
 async def _pull_server(server_name: str) -> dict:
@@ -380,8 +417,16 @@ async def _pull_server(server_name: str) -> dict:
     return {"server": server_name, "image": server_def.image, "image_id": image_id}
 
 
-async def _create_session(name: str | None) -> dict:
-    session = sessions.create_session(name=name)
+async def _create_session(name: str | None, auth: AuthContext) -> dict:
+    # Enforce session quota
+    if auth.max_sessions is not None:
+        current = sessions.count_sessions_for_tenant(auth.tenant_id)
+        if current >= auth.max_sessions:
+            raise PermissionError(
+                f"Tenant {auth.tenant_id!r} has reached the session limit ({auth.max_sessions})"
+            )
+
+    session = sessions.create_session(name=name, tenant_id=auth.tenant_id)
     servers_to_warm = [_WORKSPACE_SERVER_DEF, _COMPUTE_SERVER_DEF]
     _warming[session.id] = {s.name for s in servers_to_warm}
     tasks = []
@@ -392,6 +437,7 @@ async def _create_session(name: str | None) -> dict:
     return {
         "session_id": session.id,
         "name": session.name,
+        "tenant_id": session.tenant_id,
         "volume": session.volume_name,
         "expires_at": session.expires_at.isoformat(),
     }
@@ -412,7 +458,6 @@ async def _warmup_builtin(session_id: str, server_def: ServerDef) -> None:
 
 
 async def _end_session(session_id: str) -> dict:
-    # Cancel any in-flight warmup tasks
     for task in _warmup_tasks.pop(session_id, []):
         task.cancel()
     _warming.pop(session_id, None)
@@ -473,7 +518,6 @@ async def _proxy_call_tool(
     if content:
         texts = [c.get("text", "") for c in content if c.get("type") == "text"]
         return "\n".join(texts) if texts else result
-    # Empty content (e.g. FastMCP returns [] for empty list) — use structuredContent if present
     structured = result.get("structuredContent", {}).get("result")
     if structured is not None:
         return json.dumps(structured)
@@ -501,6 +545,14 @@ async def _handle_upload(scope, receive, send) -> None:
     import base64
     from urllib.parse import parse_qs, unquote
 
+    # Auth for upload endpoint
+    try:
+        headers = {k.decode(): v.decode() for k, v in scope.get("headers", [])}
+        auth = authenticate_request(headers)
+    except PermissionError as e:
+        await _send_json_response(send, 401, {"error": str(e)})
+        return
+
     path = scope.get("path", "")
     parts = path.strip("/").split("/")
     if len(parts) < 2 or not parts[1]:
@@ -508,6 +560,14 @@ async def _handle_upload(scope, receive, send) -> None:
         return
 
     session_id = parts[1]
+
+    # Check tenant owns this session
+    try:
+        _check_session_tenant(session_id, auth)
+    except (PermissionError, ValueError) as e:
+        status = 403 if isinstance(e, PermissionError) else 404
+        await _send_json_response(send, status, {"error": str(e)})
+        return
 
     query_string = scope.get("query_string", b"").decode()
     params = parse_qs(query_string)
@@ -536,7 +596,8 @@ async def _handle_upload(scope, receive, send) -> None:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def run_stdio() -> None:
-    """Run the gateway over stdio (for Claude Desktop / MCP CLI)."""
+    """Run the gateway over stdio (for Claude Desktop / MCP CLI).
+    No auth — stdio is always the default tenant."""
     from cooperage.session.manager import start_cleanup_thread
     _ensure_builtins_registered()
     start_cleanup_thread()
@@ -556,6 +617,7 @@ async def run_sse(host: str | None = None, port: int | None = None) -> None:
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
     _ensure_builtins_registered()
+    load_api_keys()
     start_cleanup_thread()
 
     session_manager = StreamableHTTPSessionManager(
@@ -572,8 +634,33 @@ async def run_sse(host: str | None = None, port: int | None = None) -> None:
                     await send({"type": "lifespan.startup.complete"})
                     await receive()
                     await send({"type": "lifespan.shutdown.complete"})
-            elif scope["type"] == "http" and scope.get("path", "").startswith("/upload/"):
+                return
+
+            if scope["type"] == "http" and scope.get("path", "") == "/oidc-config":
+                oidc = get_oidc_config()
+                if oidc is None:
+                    await _send_json_response(send, 404, {"error": "OIDC not configured"})
+                else:
+                    await _send_json_response(send, 200, oidc)
+                return
+
+            if scope["type"] == "http" and scope.get("path", "").startswith("/upload/"):
                 await _handle_upload(scope, receive, send)
+                return
+
+            # Authenticate MCP requests from HTTP headers
+            if scope["type"] == "http":
+                headers = {k.decode(): v.decode() for k, v in scope.get("headers", [])}
+                try:
+                    auth = authenticate_request(headers)
+                except PermissionError as e:
+                    await _send_json_response(send, 401, {"error": str(e)})
+                    return
+                token = _auth_ctx.set(auth)
+                try:
+                    await session_manager.handle_request(scope, receive, send)
+                finally:
+                    _auth_ctx.reset(token)
             else:
                 await session_manager.handle_request(scope, receive, send)
 

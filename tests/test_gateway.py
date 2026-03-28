@@ -7,7 +7,11 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
+from cooperage.core.auth import AuthContext
 from cooperage.core.models import ContainerInfo, ServerDef, Session
+
+# Default auth context for tests (no RBAC restrictions)
+_DEFAULT_AUTH = AuthContext(tenant_id="default")
 
 
 def _session(name=None) -> Session:
@@ -44,7 +48,7 @@ def test_list_servers_returns_names_and_descriptions(mock_load, mock_get_orch):
         ServerDef(name="cfd", image="cfd:latest", description="CFD solver"),
     ]
     from cooperage.gateway.server import _list_servers
-    result = _list_servers()
+    result = _list_servers(_DEFAULT_AUTH)
     assert len(result) == 2
     assert result[0]["name"] == "sim"
     assert result[1]["description"] == "CFD solver"
@@ -56,7 +60,7 @@ def test_list_servers_includes_cached_flag(mock_load, mock_get_orch):
     mock_get_orch.return_value = _mock_orch(image_exists=False)
     mock_load.return_value = [ServerDef(name="sim", image="sim:latest")]
     from cooperage.gateway.server import _list_servers
-    result = _list_servers()
+    result = _list_servers(_DEFAULT_AUTH)
     assert result[0]["cached"] is False
 
 
@@ -65,7 +69,7 @@ def test_list_servers_includes_cached_flag(mock_load, mock_get_orch):
 def test_list_servers_empty(mock_load, mock_get_orch):
     mock_get_orch.return_value = _mock_orch()
     from cooperage.gateway.server import _list_servers
-    assert _list_servers() == []
+    assert _list_servers(_DEFAULT_AUTH) == []
 
 
 @patch("cooperage.gateway.server.get_orchestrator")
@@ -77,7 +81,7 @@ def test_list_servers_hides_workspace_server(mock_load, mock_get_orch):
         ServerDef(name="sim", image="sim:latest"),
     ]
     from cooperage.gateway.server import _list_servers
-    result = _list_servers()
+    result = _list_servers(_DEFAULT_AUTH)
     assert len(result) == 1
     assert result[0]["name"] == "sim"
 
@@ -113,12 +117,12 @@ async def test_create_session_returns_expected_keys(mock_create, mock_warmup):
     session = _session(name="test-run")
     mock_create.return_value = session
     from cooperage.gateway.server import _create_session
-    result = await _create_session("test-run")
+    result = await _create_session("test-run", _DEFAULT_AUTH)
     assert result["session_id"] == session.id
     assert result["name"] == "test-run"
     assert result["volume"] == session.volume_name
     assert "expires_at" in result
-    mock_create.assert_called_once_with(name="test-run")
+    mock_create.assert_called_once_with(name="test-run", tenant_id="default")
 
 
 @pytest.mark.asyncio
@@ -128,7 +132,7 @@ async def test_create_session_triggers_warmup(mock_create, mock_warmup):
     session = _session()
     mock_create.return_value = session
     from cooperage.gateway.server import _create_session
-    await _create_session(None)
+    await _create_session(None, _DEFAULT_AUTH)
     assert mock_warmup.call_count == 2  # workspace + compute
 
 
@@ -258,8 +262,9 @@ async def test_workspace_list_proxies_to_workspace_server(mock_proxy):
 
 
 @pytest.mark.asyncio
+@patch("cooperage.gateway.server._check_session_tenant")
 @patch("cooperage.gateway.server._workspace_op")
-async def test_dispatch_workspace_write(mock_op):
+async def test_dispatch_workspace_write(mock_op, mock_check):
     mock_op.return_value = {"written": "plan.md"}
     from cooperage.gateway.server import _dispatch
     await _dispatch("cooperage_workspace_write", {
@@ -269,8 +274,9 @@ async def test_dispatch_workspace_write(mock_op):
 
 
 @pytest.mark.asyncio
+@patch("cooperage.gateway.server._check_session_tenant")
 @patch("cooperage.gateway.server._workspace_op")
-async def test_dispatch_workspace_read(mock_op):
+async def test_dispatch_workspace_read(mock_op, mock_check):
     mock_op.return_value = "hello"
     from cooperage.gateway.server import _dispatch
     await _dispatch("cooperage_workspace_read", {"session_id": "s1", "path": "plan.md"})
@@ -278,8 +284,9 @@ async def test_dispatch_workspace_read(mock_op):
 
 
 @pytest.mark.asyncio
+@patch("cooperage.gateway.server._check_session_tenant")
 @patch("cooperage.gateway.server._workspace_op")
-async def test_dispatch_workspace_list(mock_op):
+async def test_dispatch_workspace_list(mock_op, mock_check):
     mock_op.return_value = []
     from cooperage.gateway.server import _dispatch
     await _dispatch("cooperage_workspace_list", {"session_id": "s1"})

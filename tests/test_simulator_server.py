@@ -31,7 +31,7 @@ def test_generate_scene_creates_image_file(tmp_path):
 def test_generate_scene_creates_metadata_file(tmp_path):
     srv = _import_srv()
     srv._generate_scene("urban", 64, 64, seed=1)
-    meta_path = tmp_path / "scene_meta.json"
+    meta_path = tmp_path / "scene.json"
     assert meta_path.exists()
     meta = json.loads(meta_path.read_text())
     assert meta["scene_type"] == "urban"
@@ -110,7 +110,7 @@ async def test_list_workspace_shows_generated_files(tmp_path):
     srv._generate_scene("terrain", 32, 32, seed=0)
     result = await srv.call_tool("list_workspace", {})
     assert "scene.png" in result[0].text
-    assert "scene_meta.json" in result[0].text
+    assert "scene.json" in result[0].text
 
 
 # ── call_tool dispatch ────────────────────────────────────────────────────────

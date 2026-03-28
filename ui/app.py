@@ -3,12 +3,20 @@ Cooperage Workspace UI
 
 Live viewer for active sessions, running containers, and /workspace file contents.
 Run via: cooperage ui
+
+Supports three auth modes:
+  - No auth (local dev) — just works
+  - API key / JWT — paste in the sidebar
+  - SSO (OIDC) — redirects to your identity provider automatically
 """
 
 import base64
+import hashlib
 import io
 import json
+import secrets
 import tarfile
+from urllib.parse import urlencode
 
 import httpx
 import streamlit as st
@@ -19,18 +27,166 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── Config (outside fragment so sidebar widgets are always live) ───────────────
 
+# ── Sidebar config ────────────────────────────────────────────────────────────
+
+st.sidebar.title("⚙️ Settings")
 GATEWAY_URL = st.sidebar.text_input("Gateway URL", value="http://localhost:8080/mcp")
 AUTO_REFRESH = st.sidebar.slider("Auto-refresh (seconds)", 1, 30, 1)
 
-st.title("🪵 Cooperage")
 
-# ── MCP helpers ───────────────────────────────────────────────────────────────
+# ── OIDC state helpers ────────────────────────────────────────────────────────
+
+def _fetch_oidc_config() -> dict | None:
+    """Fetch OIDC config from the gateway. Returns None if not configured."""
+    try:
+        resp = httpx.get(f"{_gateway_base()}/oidc-config", timeout=5)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def _handle_oidc_callback() -> None:
+    """Check for an OAuth2 authorization code in query params and exchange it for a token."""
+    params = st.query_params
+    code = params.get("code")
+    if not code:
+        return
+
+    # Verify state to prevent CSRF
+    returned_state = params.get("state", "")
+    expected_state = st.session_state.get("_oidc_state", "")
+    if returned_state != expected_state:
+        st.error("SSO login failed: state mismatch. Please try again.")
+        st.query_params.clear()
+        return
+
+    oidc = st.session_state.get("_oidc_config")
+    if not oidc:
+        st.query_params.clear()
+        return
+
+    # Exchange authorization code for tokens
+    issuer = oidc["issuer_url"].rstrip("/")
+    token_url = f"{issuer}/token"
+
+    try:
+        resp = httpx.post(token_url, data={
+            "grant_type": "authorization_code",
+            "client_id": oidc["client_id"],
+            "code": code,
+            "redirect_uri": _get_redirect_uri(),
+            "code_verifier": st.session_state.get("_oidc_verifier", ""),
+        }, timeout=10)
+        resp.raise_for_status()
+        tokens = resp.json()
+
+        # Store the access token (prefer id_token for OIDC, fall back to access_token)
+        token = tokens.get("id_token") or tokens.get("access_token")
+        if token:
+            st.session_state["_oidc_token"] = token
+    except Exception as e:
+        st.error(f"SSO token exchange failed: {e}")
+
+    st.query_params.clear()
+
+
+def _get_redirect_uri() -> str:
+    """Build the OAuth2 redirect URI pointing back to this Streamlit app."""
+    # Streamlit apps run on localhost:8501 by default
+    return "http://localhost:8501"
+
+
+def _generate_pkce() -> tuple[str, str]:
+    """Generate a PKCE code_verifier and code_challenge pair."""
+    verifier = secrets.token_urlsafe(64)
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()
+    ).rstrip(b"=").decode()
+    return verifier, challenge
+
+
+def _start_oidc_login(oidc: dict) -> str:
+    """Build the OIDC authorization URL and store state for later verification."""
+    state = secrets.token_urlsafe(32)
+    verifier, challenge = _generate_pkce()
+
+    st.session_state["_oidc_state"] = state
+    st.session_state["_oidc_verifier"] = verifier
+    st.session_state["_oidc_config"] = oidc
+
+    params = {
+        "response_type": "code",
+        "client_id": oidc["client_id"],
+        "redirect_uri": _get_redirect_uri(),
+        "scope": oidc["scopes"],
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+    return f"{oidc['authorization_endpoint']}?{urlencode(params)}"
+
+
+# ── Auth sidebar ──────────────────────────────────────────────────────────────
+
+def _render_auth_sidebar() -> None:
+    """Render the authentication section in the sidebar."""
+    oidc = _fetch_oidc_config()
+
+    with st.sidebar.expander("🔑 Authentication", expanded=not _get_token()):
+        if oidc:
+            # SSO is available
+            if st.session_state.get("_oidc_token"):
+                st.success("Signed in via SSO")
+                if st.button("Sign out", use_container_width=True):
+                    st.session_state.pop("_oidc_token", None)
+                    st.session_state.pop("_oidc_state", None)
+                    st.session_state.pop("_oidc_verifier", None)
+                    st.rerun()
+            else:
+                login_url = _start_oidc_login(oidc)
+                st.link_button("🔒 Sign in with SSO", login_url, use_container_width=True)
+                st.divider()
+                st.caption("Or paste a token manually:")
+                st.text_input("API key or JWT", type="password", key="auth_token")
+        else:
+            # No SSO — manual token only
+            st.caption("Leave blank for local mode. Required when the gateway has auth enabled.")
+            st.text_input("API key or JWT", type="password", key="auth_token")
+
+
+def _get_token() -> str:
+    """Return the current auth token — from SSO or manual entry."""
+    return st.session_state.get("_oidc_token") or st.session_state.get("auth_token", "")
+
+
+# ── HTTP helpers ──────────────────────────────────────────────────────────────
+
+def _gateway_base() -> str:
+    """Derive the base gateway URL (without /mcp) for non-MCP endpoints."""
+    if GATEWAY_URL.endswith("/mcp"):
+        return GATEWAY_URL[:-4]
+    return GATEWAY_URL.rstrip("/")
+
+
+def _auth_headers() -> dict[str, str]:
+    """Build Authorization header if a token is available."""
+    token = _get_token()
+    if token:
+        return {"Authorization": f"Bearer {token}"}
+    return {}
+
 
 def _call(method: str, params: dict) -> dict:
+    """Send a JSON-RPC request to the gateway."""
     payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        **_auth_headers(),
+    }
     resp = httpx.post(GATEWAY_URL, json=payload, headers=headers, timeout=10)
     resp.raise_for_status()
     data = resp.json()
@@ -46,15 +202,33 @@ def call_tool(tool_name: str, arguments: dict) -> str:
     return "\n".join(texts)
 
 
-def list_sessions() -> list[dict]:
+# ── Gateway connectivity check ───────────────────────────────────────────────
+
+def _check_gateway() -> str | None:
+    """Return an error message if the gateway is unreachable, or None if OK."""
     try:
-        raw = call_tool("cooperage_list_sessions", {})
-        data = json.loads(raw) if isinstance(raw, str) else raw
-        if not isinstance(data, list):
-            return []
-        return data
-    except Exception:
+        _call("tools/list", {})
+        return None
+    except httpx.ConnectError:
+        return f"Cannot connect to gateway at `{GATEWAY_URL}`. Is it running?"
+    except httpx.TimeoutException:
+        return f"Gateway at `{GATEWAY_URL}` timed out."
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            return "Authentication failed — check your credentials in the sidebar."
+        return f"Gateway returned HTTP {e.response.status_code}."
+    except Exception as e:
+        return f"Gateway error: {e}"
+
+
+# ── Session / workspace API ──────────────────────────────────────────────────
+
+def list_sessions() -> list[dict]:
+    raw = call_tool("cooperage_list_sessions", {})
+    data = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(data, list):
         return []
+    return data
 
 
 def workspace_list(session_id: str) -> list[str]:
@@ -68,7 +242,9 @@ def workspace_list(session_id: str) -> list[str]:
 
 
 def workspace_read(session_id: str, path: str, max_size: int = 32) -> str:
-    return call_tool("cooperage_workspace_read", {"session_id": session_id, "path": path, "max_size": max_size})
+    return call_tool("cooperage_workspace_read", {
+        "session_id": session_id, "path": path, "max_size": max_size,
+    })
 
 
 def workspace_read_raw(session_id: str, path: str) -> tuple[bytes, str]:
@@ -131,18 +307,74 @@ def _render_tree(tree: dict, prefix: str = "") -> None:
             st.session_state["selected_file"] = full_path
 
 
+# ── File preview ──────────────────────────────────────────────────────────────
+
+def _render_preview(session_id: str, selected_file: str) -> None:
+    """Render the file preview panel for the selected file."""
+    try:
+        content = workspace_read(session_id, selected_file, max_size=0)
+        ext = selected_file.rsplit(".", 1)[-1].lower() if "." in selected_file else ""
+
+        binary = None
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, dict) and parsed.get("type") == "binary":
+                binary = parsed
+        except Exception:
+            pass
+
+        with st.container(height=500):
+            if binary is not None:
+                mime = binary.get("mime", "")
+                if mime.startswith("image/"):
+                    st.image(base64.b64decode(binary["data"]))
+                else:
+                    st.caption(f"Cannot preview .{ext} files")
+            elif ext == "json":
+                try:
+                    st.json(json.loads(content))
+                except Exception:
+                    st.code(content)
+            elif ext in ("md", "markdown"):
+                st.markdown(content)
+            else:
+                st.code(content)
+
+        st.divider()
+        dl_data, dl_mime = workspace_read_raw(session_id, selected_file)
+        st.download_button(
+            f"⬇️ Download {selected_file.split('/')[-1]}",
+            data=dl_data,
+            file_name=selected_file.split("/")[-1],
+            mime=dl_mime,
+            use_container_width=True,
+        )
+    except Exception as e:
+        st.error(f"Could not read file: {e}")
+
+
 # ── Main content (fragment refreshes without full-page flash) ─────────────────
 
 @st.fragment(run_every=AUTO_REFRESH)
 def main_content() -> None:
-    all_sessions = list_sessions()
+    # Check gateway connectivity first
+    error = _check_gateway()
+    if error is not None:
+        st.error(error)
+        return
+
+    try:
+        all_sessions = list_sessions()
+    except Exception as e:
+        st.error(f"Failed to list sessions: {e}")
+        return
 
     if not all_sessions:
         st.info("No active sessions. Create one in Claude Desktop with `cooperage_create_session`.")
         return
 
     session_names = {
-        f"{s.get('name') or 'unnamed'} ({s['session_id'][:8]}...)": s['session_id']
+        f"{s.get('name') or 'unnamed'} ({s['session_id'][:8]}...)": s["session_id"]
         for s in all_sessions
     }
     selected_label = st.selectbox("Session", list(session_names.keys()))
@@ -156,6 +388,7 @@ def main_content() -> None:
 
     col_containers, col_files, col_preview = st.columns([1, 1, 2])
 
+    # ── Containers panel ──────────────────────────────────────────────────────
     with col_containers:
         st.subheader("Containers")
         containers = session.get("containers", [])
@@ -170,8 +403,7 @@ def main_content() -> None:
                 st.info(f"🔵 **{c['server_name']}** `{c['container_id'][:12]}`")
         st.caption("🟢 Built-in  🔵 Add-on  ⏳ Warming")
 
-    gateway_base = GATEWAY_URL[:-4] if GATEWAY_URL.endswith("/mcp") else GATEWAY_URL.rstrip("/")
-
+    # ── Workspace panel ───────────────────────────────────────────────────────
     with col_files:
         st.subheader("Workspace")
         files = workspace_list(session_id)
@@ -200,10 +432,13 @@ def main_content() -> None:
                 if st.button("Upload", key=f"upload_btn__{session_id}", use_container_width=True):
                     try:
                         resp = httpx.post(
-                            f"{gateway_base}/upload/{session_id}",
+                            f"{_gateway_base()}/upload/{session_id}",
                             params={"path": dest},
                             content=uploaded.getvalue(),
-                            headers={"Content-Type": "application/octet-stream"},
+                            headers={
+                                "Content-Type": "application/octet-stream",
+                                **_auth_headers(),
+                            },
                             timeout=60,
                         )
                         resp.raise_for_status()
@@ -212,53 +447,25 @@ def main_content() -> None:
                     except Exception as e:
                         st.error(f"Upload failed: {e}")
 
+    # ── Preview panel ─────────────────────────────────────────────────────────
     selected_file = st.session_state.get("selected_file")
 
     with col_preview:
         st.subheader("Preview")
         if selected_file:
-            try:
-                content = workspace_read(session_id, selected_file, max_size=0)
-                ext = selected_file.rsplit(".", 1)[-1].lower() if "." in selected_file else ""
-
-                binary = None
-                try:
-                    parsed = json.loads(content)
-                    if isinstance(parsed, dict) and parsed.get("type") == "binary":
-                        binary = parsed
-                except Exception:
-                    pass
-
-                with st.container(height=500):
-                    if binary is not None:
-                        mime = binary.get("mime", "")
-                        if mime.startswith("image/"):
-                            import base64 as _b64
-                            st.image(_b64.b64decode(binary["data"]))
-                        else:
-                            st.caption(f"Cannot preview .{ext} files")
-                    elif ext == "json":
-                        try:
-                            st.json(json.loads(content))
-                        except Exception:
-                            st.code(content)
-                    elif ext in ("md", "markdown"):
-                        st.markdown(content)
-                    else:
-                        st.code(content)
-                st.divider()
-                dl_data, dl_mime = workspace_read_raw(session_id, selected_file)
-                st.download_button(
-                    f"⬇️ Download {selected_file.split('/')[-1]}",
-                    data=dl_data,
-                    file_name=selected_file.split("/")[-1],
-                    mime=dl_mime,
-                    use_container_width=True,
-                )
-            except Exception as e:
-                st.error(f"Could not read file: {e}")
+            _render_preview(session_id, selected_file)
         else:
             st.caption("Select a file to preview.")
 
 
+# ── App entry ─────────────────────────────────────────────────────────────────
+
+# Handle OIDC callback (if returning from SSO redirect)
+_handle_oidc_callback()
+
+# Render auth sidebar
+st.title("🪵 Cooperage")
+_render_auth_sidebar()
+
+# Main content
 main_content()

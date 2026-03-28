@@ -158,6 +158,85 @@ See [`.env.example`](.env.example). Key settings:
 | `COOPERAGE_K8S_NAMESPACE` | `cooperage` | Kubernetes namespace |
 | `COOPERAGE_K8S_NODE_PORT_RANGE_START` | `30000` | NodePort range start (K8s) |
 | `COOPERAGE_K8S_NODE_PORT_RANGE_END` | `32767` | NodePort range end (K8s) |
+| `COOPERAGE_AUTH_ENABLED` | `false` | Enable API key / JWT authentication |
+| `COOPERAGE_API_KEYS_PATH` | — | Path to API keys JSON file |
+| `COOPERAGE_JWT_SECRET` | — | HS256 secret for JWT validation |
+| `COOPERAGE_DEFAULT_CPU_LIMIT` | `1.0` | Default CPU limit for containers |
+| `COOPERAGE_DEFAULT_MEMORY_LIMIT` | `512m` | Default memory limit for containers |
+| `COOPERAGE_NETWORK_ISOLATION` | `true` | Create per-session isolated networks |
+| `COOPERAGE_OIDC_ISSUER_URL` | — | OIDC issuer URL (e.g. `https://login.microsoftonline.com/{tenant}/v2.0`) |
+| `COOPERAGE_OIDC_AUDIENCE` | — | Expected `aud` claim (your app's client ID) |
+| `COOPERAGE_OIDC_TENANT_CLAIM` | `tid` | JWT claim to use as tenant_id |
+| `COOPERAGE_OIDC_CLIENT_ID` | — | OAuth2 client ID (enables SSO in the UI) |
+| `COOPERAGE_OIDC_SCOPES` | `openid profile email` | OAuth2 scopes |
+
+---
+
+## Enterprise / multi-tenant mode
+
+By default Cooperage runs in **local demo mode** — no auth, no tenant scoping, no quotas. Everything works out of the box for a single user.
+
+For shared or on-prem deployments, set `COOPERAGE_AUTH_ENABLED=true` to enable multi-tenancy:
+
+### Authentication
+
+Cooperage supports three auth methods (checked in order):
+
+1. **API keys** — static keys mapped to tenants. Set `COOPERAGE_API_KEYS_PATH` to a JSON file:
+
+```json
+[
+  {
+    "key": "sk-cooperage-abc123...",
+    "tenant_id": "acme-corp",
+    "allowed_servers": ["sim-runner", "image-analyzer"],
+    "max_sessions": 10
+  }
+]
+```
+
+2. **HS256 JWT** — signed tokens with a `tenant_id` claim. Set `COOPERAGE_JWT_SECRET` to your shared secret.
+
+3. **OIDC / SSO** — validate RS256 tokens from your identity provider (Okta, Azure AD, Auth0, etc.). Set `COOPERAGE_OIDC_ISSUER_URL` to your OIDC issuer. The gateway fetches the JWKS from the provider's discovery endpoint and validates tokens automatically. The tenant is extracted from the claim specified by `COOPERAGE_OIDC_TENANT_CLAIM` (default: `tid` for Azure AD, use `sub` for most others).
+
+Requests must include `Authorization: Bearer <key-or-jwt>`. When auth is enabled, each tenant can only see and manage their own sessions.
+
+### SSO setup (OIDC)
+
+To enable SSO login in the Cooperage UI:
+
+1. Register an OAuth2 application in your identity provider (Okta, Azure AD, etc.)
+2. Set the redirect URI to your Streamlit app URL (default: `http://localhost:8501`)
+3. Configure the gateway:
+
+```bash
+COOPERAGE_AUTH_ENABLED=true
+COOPERAGE_OIDC_ISSUER_URL=https://login.microsoftonline.com/{tenant-id}/v2.0
+COOPERAGE_OIDC_AUDIENCE=your-client-id
+COOPERAGE_OIDC_CLIENT_ID=your-client-id
+```
+
+The UI will automatically show a "Sign in with SSO" button that redirects to your identity provider. The login flow uses PKCE (Proof Key for Code Exchange) — no client secret needed.
+
+### Resource limits
+
+Every container gets CPU and memory limits (defaults: 1 CPU, 512 MB). Override globally with `COOPERAGE_DEFAULT_CPU_LIMIT` / `COOPERAGE_DEFAULT_MEMORY_LIMIT`, or per-server in the registry:
+
+```json
+{
+  "name": "heavy-solver",
+  "image": "solver:latest",
+  "resources": { "cpu": "4.0", "memory": "4g" }
+}
+```
+
+### Network isolation
+
+Each session gets its own Docker bridge network (or Kubernetes NetworkPolicy). Containers in different sessions cannot communicate. Disable with `COOPERAGE_NETWORK_ISOLATION=false`.
+
+### Private image registries
+
+Servers can specify registry credentials for pulling from private registries. On Docker, Cooperage logs in before pulling. On Kubernetes, it creates an `imagePullSecret` automatically.
 
 ---
 
@@ -217,4 +296,4 @@ Two containers. One session. One shared volume. This is what enables LLM-orchest
 uv run pytest -v
 ```
 
-85 tests, no Docker daemon or cluster required (all mocked).
+96 tests, no Docker daemon or cluster required (all mocked).

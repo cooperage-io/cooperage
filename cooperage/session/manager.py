@@ -81,18 +81,20 @@ def _parse_file_entry(entry: dict) -> tuple[Session, dict[str, ContainerInfo]]:
 
 # ── Session lifecycle ─────────────────────────────────────────────────────────
 
-def create_session(name: str | None = None) -> Session:
+def create_session(name: str | None = None, tenant_id: str = "default") -> Session:
     orch = get_orchestrator()
     session = Session(
         name=name,
+        tenant_id=tenant_id,
         expires_at=datetime.now(timezone.utc) + timedelta(seconds=settings.session_ttl_seconds),
     )
     orch.create_volume(session.volume_name)
+    orch.create_session_network(session)
     with _lock:
         _sessions[session.id] = session
         _containers[session.id] = {}
         _save()
-    logger.info("Created session %s (volume=%s)", session.id, session.volume_name)
+    logger.info("Created session %s (tenant=%s, volume=%s)", session.id, tenant_id, session.volume_name)
     return session
 
 
@@ -120,9 +122,10 @@ def get_session(session_id: str) -> Session | None:
     return None
 
 
-def list_sessions() -> list[Session]:
-    """Return all active sessions. File is authoritative for deletions — sessions
-    removed by another process (e.g. stdio gateway) are evicted from memory here."""
+def list_sessions(tenant_id: str | None = None) -> list[Session]:
+    """Return all active sessions, optionally filtered by tenant.
+    File is authoritative for deletions — sessions removed by another
+    process (e.g. stdio gateway) are evicted from memory here."""
     path = _sessions_path()
     try:
         data = json.loads(path.read_text()) if path.exists() else []
@@ -142,7 +145,16 @@ def list_sessions() -> list[Session]:
                     _sessions.pop(sid, None)
                     _containers.pop(sid, None)
         merged = {**file_sessions, **_sessions}
-        return list(merged.values())
+        all_sessions = list(merged.values())
+
+    if tenant_id is not None:
+        return [s for s in all_sessions if s.tenant_id == tenant_id]
+    return all_sessions
+
+
+def count_sessions_for_tenant(tenant_id: str) -> int:
+    """Count active sessions for a given tenant (for quota enforcement)."""
+    return len(list_sessions(tenant_id=tenant_id))
 
 
 def end_session(session_id: str) -> bool:
@@ -164,6 +176,11 @@ def end_session(session_id: str) -> bool:
         orch.remove_volume(session.volume_name)
     except Exception as e:
         logger.warning("Failed to remove volume %s: %s", session.volume_name, e)
+
+    try:
+        orch.remove_session_network(session)
+    except Exception as e:
+        logger.warning("Failed to remove network %s: %s", session.network_name, e)
 
     # Remove from file atomically
     path = _sessions_path()
