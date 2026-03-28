@@ -24,6 +24,7 @@ class ServerDef(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     resources: ResourceLimits = Field(default_factory=ResourceLimits)
     registry_credentials: RegistryCredentials | None = None
+    repo_url: str | None = None  # Source repo — LLM can clone to inspect tool code
 
 
 class ContainerInfo(BaseModel):

@@ -132,7 +132,9 @@ def tool(
         "Always call this first — registered servers may already provide domain-specific "
         "tools (e.g. simulators, analyzers, data pipelines) that are faster and more "
         "capable than writing a general script. "
-        "After listing, pull the servers you plan to use with cooperage_pull_server."
+        "After listing, pull the servers you plan to use with cooperage_pull_server. "
+        "If a server has a repo_url, you can clone it with cooperage_run_bash to inspect "
+        "its source code when debugging unexpected tool behavior."
     ),
 )
 def list_servers(auth: AuthContext, **kwargs) -> list[dict]:
@@ -143,12 +145,15 @@ def list_servers(auth: AuthContext, **kwargs) -> list[dict]:
             continue
         if auth.allowed_servers is not None and s.name not in auth.allowed_servers:
             continue
-        servers.append({
+        entry = {
             "name": s.name,
             "description": s.description,
             "image": s.image,
             "cached": orch.image_exists(s.image),
-        })
+        }
+        if s.repo_url:
+            entry["repo_url"] = s.repo_url
+        servers.append(entry)
     return servers
 
 
