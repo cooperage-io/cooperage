@@ -218,12 +218,15 @@ async def pull_server(server_name: str, **kwargs) -> dict:
     description=(
         "Create a new Cooperage workspace session. "
         "Returns a session_id. All containers started within this session "
-        "share a /workspace volume for data exchange."
+        "share a /workspace volume for data exchange. "
+        "If a ui_url is returned, share it with the user so they can monitor "
+        "their session's files and containers in real time."
     ),
     params={"name": {"type": "string", "description": "Optional human-readable name for the session"}},
     required=[],
 )
 async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -> dict:
+    from cooperage.core.config import settings as _settings
     if auth.max_sessions is not None:
         current = sessions.count_sessions_for_tenant(auth.tenant_id)
         if current >= auth.max_sessions:
@@ -239,13 +242,16 @@ async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -
         task = asyncio.create_task(_warmup_builtin(session.id, server_def))
         tasks.append(task)
     _warmup_tasks[session.id] = tasks
-    return {
+    result = {
         "session_id": session.id,
         "name": session.name,
         "tenant_id": session.tenant_id,
         "volume": session.volume_name,
         "expires_at": session.expires_at.isoformat(),
     }
+    if _settings.ui_url:
+        result["ui_url"] = f"{_settings.ui_url.rstrip('/')}/?session={session.id}"
+    return result
 
 
 @tool(

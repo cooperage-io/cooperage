@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     # Gateway
     gateway_host: str = "0.0.0.0"
     gateway_port: int = 8080
+    ui_url: str | None = None  # e.g. "http://localhost:8501" — shown to users after session creation
 
     # Container workspace mount path
     workspace_mount: str = "/workspace"
