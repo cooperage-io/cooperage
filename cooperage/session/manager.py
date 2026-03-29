@@ -16,6 +16,8 @@ _sessions: dict[str, Session] = {}
 # session_id → {server_name → ContainerInfo}
 _containers: dict[str, dict[str, ContainerInfo]] = {}
 _lock = threading.Lock()
+# Per-(session_id, server_name) locks to prevent duplicate container starts
+_start_locks: dict[str, threading.Lock] = {}
 
 
 # ── File persistence ──────────────────────────────────────────────────────────
@@ -203,28 +205,44 @@ def get_or_start_container(session_id: str, server_def: ServerDef) -> ContainerI
     session = get_session(session_id)
     if session is None:
         raise ValueError(f"Session {session_id!r} not found")
+
+    start_key = f"{session_id}:{server_def.name}"
+
+    # Fast path: already running
     with _lock:
         existing = _containers[session_id].get(server_def.name)
+        if existing is not None:
+            return existing
+        # Create a per-container start lock if needed, while holding _lock
+        if start_key not in _start_locks:
+            _start_locks[start_key] = threading.Lock()
+        start_lock = _start_locks[start_key]
 
-    if existing is not None:
-        return existing
+    # Serialize concurrent starts of the same container
+    with start_lock:
+        # Re-check: a concurrent caller may have started it while we waited
+        with _lock:
+            existing = _containers[session_id].get(server_def.name)
+        if existing is not None:
+            return existing
 
-    info = orch.start_container(server_def, session)
-    ready = orch.wait_until_ready(info)
-    if not ready:
-        logs = orch.get_container_logs(info.container_id)
-        orch.stop_container(info.container_id)
-        raise RuntimeError(
-            f"Container for server {server_def.name!r} failed to start "
-            f"within {settings.container_startup_timeout}s.\n"
-            f"Container logs:\n{logs}"
-        )
+        info = orch.start_container(server_def, session)
+        ready = orch.wait_until_ready(info)
+        if not ready:
+            logs = orch.get_container_logs(info.container_id)
+            orch.stop_container(info.container_id)
+            raise RuntimeError(
+                f"Container for server {server_def.name!r} failed to start "
+                f"within {settings.container_startup_timeout}s.\n"
+                f"Container logs:\n{logs}"
+            )
 
-    with _lock:
-        if session_id in _sessions:
-            _sessions[session_id].containers[server_def.name] = info.container_id
-            _containers[session_id][server_def.name] = info
-            _save()
+        with _lock:
+            if session_id in _sessions:
+                _sessions[session_id].containers[server_def.name] = info.container_id
+                _containers[session_id][server_def.name] = info
+                _save()
+            _start_locks.pop(start_key, None)
 
     return info
 
