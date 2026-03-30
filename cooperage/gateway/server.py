@@ -742,6 +742,10 @@ async def run_sse(host: str | None = None, port: int | None = None) -> None:
                     await send({"type": "lifespan.shutdown.complete"})
                 return
 
+            if scope["type"] == "http" and scope.get("path", "") == "/health":
+                await _send_json_response(send, 200, {"status": "ok"})
+                return
+
             if scope["type"] == "http" and scope.get("path", "") == "/oidc-config":
                 oidc = get_oidc_config()
                 if oidc is None:

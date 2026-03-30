@@ -33,6 +33,8 @@
 - [x] `simulator` + `analysis` example servers
 - [x] 161 unit tests (mocked) + cloud integration test suite against live droplet
 - [x] MIT license, cooperage-io GitHub org
+- [x] Helm chart — gateway Deployment + ServiceAccount + Role + ConfigMap + Ingress + UI sidecar
+- [x] `/health` endpoint — K8s liveness/readiness probes
 
 ---
 
@@ -58,6 +60,5 @@ The LLM should prefer registered domain-specific servers when available, and fal
 - **`cooperage deploy` CLI** — thin wrapper to provision cloud infra (droplet or K8s) and deploy the stack
 - **K8s: RWX PVC workspace** — optional alternative to hostPath + pod affinity for clusters with RWX StorageClass
 - **K8s: Ingress support** — replace NodePort with Ingress/ClusterIP for production on-prem routing
-- **K8s: Helm chart** — gateway as a Deployment with ServiceAccount + ClusterRole + ConfigMap
 - **Session sharing** — read-only `session_id` tokens so a user can watch a session without write access
 - **Webhook / event stream** — push session/container lifecycle events to an external URL

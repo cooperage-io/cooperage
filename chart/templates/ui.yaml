@@ -1,0 +1,53 @@
+{{- if .Values.ui.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cooperage-ui
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: cooperage
+    app.kubernetes.io/component: ui
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cooperage
+      app.kubernetes.io/component: ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cooperage
+        app.kubernetes.io/component: ui
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: ui
+          image: "{{ .Values.ui.image.repository }}:{{ .Values.ui.image.tag }}"
+          ports:
+            - name: http
+              containerPort: {{ .Values.ui.port }}
+          env:
+            - name: COOPERAGE_GATEWAY_URL
+              value: "http://cooperage-gateway.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cooperage-ui
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: cooperage
+    app.kubernetes.io/component: ui
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: {{ .Values.ui.service.type }}
+  ports:
+    - port: {{ .Values.ui.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: cooperage
+    app.kubernetes.io/component: ui
+{{- end }}

@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cooperage-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: cooperage
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  COOPERAGE_ORCHESTRATOR: kubernetes
+  COOPERAGE_K8S_NAMESPACE: {{ .Values.workloadNamespace | quote }}
+  COOPERAGE_K8S_HOST_PATH_PREFIX: {{ .Values.kubernetes.hostPathPrefix | quote }}
+  COOPERAGE_K8S_NODE_PORT_RANGE_START: {{ .Values.kubernetes.nodePortRangeStart | quote }}
+  COOPERAGE_K8S_NODE_PORT_RANGE_END: {{ .Values.kubernetes.nodePortRangeEnd | quote }}
+  COOPERAGE_GATEWAY_HOST: "0.0.0.0"
+  COOPERAGE_GATEWAY_PORT: "8080"
+  COOPERAGE_SESSION_TTL_SECONDS: {{ .Values.session.ttlSeconds | quote }}
+  COOPERAGE_SESSION_CLEANUP_INTERVAL: {{ .Values.session.cleanupInterval | quote }}
+  COOPERAGE_CONTAINER_IDLE_TIMEOUT: {{ .Values.session.idleTimeout | quote }}
+  COOPERAGE_SESSION_EXTEND_ON_ACTIVITY: {{ .Values.session.extendOnActivity | quote }}
+  COOPERAGE_DEFAULT_CPU_LIMIT: {{ .Values.containerDefaults.cpuLimit | quote }}
+  COOPERAGE_DEFAULT_MEMORY_LIMIT: {{ .Values.containerDefaults.memoryLimit | quote }}
+  COOPERAGE_NETWORK_ISOLATION: {{ .Values.networkIsolation | quote }}
+  COOPERAGE_AUTH_ENABLED: {{ .Values.auth.enabled | quote }}
+  {{- if .Values.auth.oidc.issuerUrl }}
+  COOPERAGE_OIDC_ISSUER_URL: {{ .Values.auth.oidc.issuerUrl | quote }}
+  {{- end }}
+  {{- if .Values.auth.oidc.audience }}
+  COOPERAGE_OIDC_AUDIENCE: {{ .Values.auth.oidc.audience | quote }}
+  {{- end }}
+  COOPERAGE_OIDC_TENANT_CLAIM: {{ .Values.auth.oidc.tenantClaim | quote }}
+  {{- if .Values.auth.oidc.clientId }}
+  COOPERAGE_OIDC_CLIENT_ID: {{ .Values.auth.oidc.clientId | quote }}
+  {{- end }}
+  COOPERAGE_OIDC_SCOPES: {{ .Values.auth.oidc.scopes | quote }}
+  {{- if .Values.ui.enabled }}
+  COOPERAGE_UI_URL: "http://cooperage-ui.{{ .Release.Namespace }}.svc:{{ .Values.ui.port }}"
+  {{- end }}

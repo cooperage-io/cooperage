@@ -1,0 +1,40 @@
+# The gateway needs to create/delete pods, services, secrets, and network policies
+# in the workload namespace to orchestrate MCP server containers.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cooperage-gateway
+  namespace: {{ .Values.workloadNamespace }}
+  labels:
+    app.kubernetes.io/name: cooperage
+    app.kubernetes.io/instance: {{ .Release.Name }}
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [create, get, delete]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [create, delete]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create, update, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [create, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cooperage-gateway
+  namespace: {{ .Values.workloadNamespace }}
+  labels:
+    app.kubernetes.io/name: cooperage
+    app.kubernetes.io/instance: {{ .Release.Name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cooperage-gateway
+subjects:
+  - kind: ServiceAccount
+    name: cooperage-gateway
+    namespace: {{ .Release.Namespace }}

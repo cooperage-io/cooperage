@@ -1,0 +1,80 @@
+# -- Gateway image
+image:
+  repository: ghcr.io/cooperage-io/cooperage
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# -- Number of gateway replicas (1 recommended — session state is local)
+replicaCount: 1
+
+# -- Namespace for cooperage workload pods (created by the chart)
+workloadNamespace: cooperage
+
+# -- Gateway service
+service:
+  type: ClusterIP
+  port: 8080
+
+# -- Ingress (disabled by default)
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: cooperage.example.com
+  tls: []
+  #  - secretName: cooperage-tls
+  #    hosts:
+  #      - cooperage.example.com
+
+# -- Gateway resource limits
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# -- Session settings
+session:
+  ttlSeconds: 1800
+  cleanupInterval: 60
+  idleTimeout: 600
+  extendOnActivity: true
+
+# -- Default resource limits for workload containers
+containerDefaults:
+  cpuLimit: "1.0"
+  memoryLimit: 512m
+
+# -- Kubernetes orchestrator settings
+kubernetes:
+  hostPathPrefix: /run/cooperage
+  nodePortRangeStart: 30000
+  nodePortRangeEnd: 32767
+
+# -- Network isolation (NetworkPolicy per session)
+networkIsolation: true
+
+# -- Authentication
+auth:
+  enabled: false
+  # -- HS256 JWT secret (set via --set or external secret)
+  jwtSecret: ""
+  # -- OIDC settings
+  oidc:
+    issuerUrl: ""
+    audience: ""
+    tenantClaim: tid
+    clientId: ""
+    scopes: "openid profile email"
+
+# -- UI sidecar (Streamlit workspace viewer)
+ui:
+  enabled: false
+  image:
+    repository: ghcr.io/cooperage-io/cooperage-ui
+    tag: latest
+  port: 8501
+  service:
+    type: ClusterIP
