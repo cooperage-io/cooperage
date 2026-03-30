@@ -135,6 +135,9 @@ def tool(
         "After listing, pull the servers you plan to use with cooperage_pull_server. "
         "If a server has a repo_url, you can clone it with cooperage_run_bash to inspect "
         "its source code when debugging unexpected tool behavior."
+        "The user is not required to know what servers are available in advance or their status."
+        "So you may report your findings to the user of what relevant servers are available for the "
+        "task at hand."
     ),
 )
 def list_servers(auth: AuthContext, **kwargs) -> list[dict]:

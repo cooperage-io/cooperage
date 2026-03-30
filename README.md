@@ -218,7 +218,7 @@ cooperage ui            Launch the web dashboard
 ## Tests
 
 ```bash
-uv run pytest -v    # 156 tests, no Docker daemon needed
+uv run pytest -v
 ```
 
 ## License
