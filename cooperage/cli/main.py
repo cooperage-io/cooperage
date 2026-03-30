@@ -101,11 +101,14 @@ def start(
     sse: bool = typer.Option(False, "--sse", help="Run as HTTP/SSE server instead of stdio"),
     host: str = typer.Option("0.0.0.0", help="Host to bind (SSE mode only)"),
     port: int = typer.Option(8080, help="Port to bind (SSE mode only)"),
+    proxy: str = typer.Option(None, "--proxy", help="Forward all MCP traffic to a remote gateway URL"),
 ):
     """Start the Cooperage MCP gateway."""
-    from cooperage.gateway.server import run_stdio, run_sse
+    from cooperage.gateway.server import run_proxy, run_stdio, run_sse
 
-    if sse:
+    if proxy:
+        asyncio.run(run_proxy(proxy))
+    elif sse:
         console.print(f"[green]Starting Cooperage gateway (SSE)[/] on {host}:{port}")
         asyncio.run(run_sse(host=host, port=port))
     else:

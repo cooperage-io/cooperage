@@ -667,6 +667,36 @@ async def _handle_upload(scope, receive, send) -> None:
 
 # ── Entry points ──────────────────────────────────────────────────────────────
 
+async def run_proxy(url: str) -> None:
+    """Bridge stdio (Claude Desktop) to a remote Cooperage gateway over HTTP.
+
+    Forwards every MCP message from stdin to the remote gateway and streams
+    responses back to stdout — no local Docker or session state needed.
+    """
+    import anyio
+    from mcp.client.streamable_http import streamable_http_client
+
+    async with streamable_http_client(url) as (remote_read, remote_write, _):
+        async with stdio_server() as (local_read, local_write):
+            async def stdin_to_remote() -> None:
+                async with remote_write:
+                    async for msg in local_read:
+                        if isinstance(msg, Exception):
+                            continue
+                        await remote_write.send(msg)
+
+            async def remote_to_stdout() -> None:
+                async with local_write:
+                    async for msg in remote_read:
+                        if isinstance(msg, Exception):
+                            continue
+                        await local_write.send(msg)
+
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(stdin_to_remote)
+                tg.start_soon(remote_to_stdout)
+
+
 async def run_stdio() -> None:
     """Run the gateway over stdio (for Claude Desktop / MCP CLI).
     No auth — stdio is always the default tenant."""
