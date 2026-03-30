@@ -210,10 +210,27 @@ cooperage ui            Launch the web dashboard
 | | Containers per session | Shared workspace | Infrastructure | Image source |
 |-|------------------------|-----------------|----------------|--------------|
 | **Cooperage** | Multiple (one per server) | Shared `/workspace` volume | Docker or Kubernetes | Any registry |
+| **Manus** | Single VM | `/home/ubuntu` in one sandbox | Manus cloud only | Pre-installed runtimes |
 | **Docker MCP Toolkit** | Multiple | Each container isolated | Docker Desktop only | Docker catalog |
 | **AWS Bedrock AgentCore** | One (tools colocated) | Partial — 1 GB, preview | AWS only | ECR |
 | **Google ADK + Vertex** | No container orchestration | Memory state only | GCP only | — |
 | **Azure AI Foundry** | No container orchestration | Thread state only | Azure only | — |
+
+### Cooperage vs Manus
+
+Manus gives every agent a single pre-built Ubuntu VM with Python, Node.js, and Chromium. MCP servers are external API bridges — the agent calls out to them via `manus-mcp-cli`. It's a managed, general-purpose sandbox that works well for everyday tasks with zero setup.
+
+Cooperage takes a different approach: there is no pre-built VM. The LLM dynamically spins up purpose-built containers, each running its own MCP server, all sharing a `/workspace` volume. MCP isn't a bridge to external services — it's the native interface between the LLM and the compute.
+
+**Choose Manus** if you want a turnkey managed environment and don't need to control the infrastructure.
+
+**Choose Cooperage** if you need:
+- **Self-hosted / on-prem deployment** — your cluster, your network, your data
+- **Custom runtimes** — CUDA, GDAL, proprietary SDKs, anything you can put in a Docker image
+- **Multi-tool pipelines** — containers with different dependencies composing through `/workspace`
+- **Enterprise auth and isolation** — OIDC, JWT, per-tenant RBAC, network policies, resource limits
+
+For a deeper comparison, see [docs/cooperage-vs-manus.md](docs/cooperage-vs-manus.md).
 
 ## Tests
 
