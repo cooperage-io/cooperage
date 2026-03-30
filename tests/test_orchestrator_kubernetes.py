@@ -49,8 +49,8 @@ def test_pull_image_spawns_and_deletes_pull_pod(mock_mono, _mock_sleep):
     core_api.create_namespaced_pod.assert_called_once()
     core_api.delete_namespaced_pod.assert_called()
 
-    meta_calls = [str(c) for c in client.V1ObjectMeta.call_args_list]
-    assert any("cooperage-pull" in c for c in meta_calls)
+    pod_body = core_api.create_namespaced_pod.call_args.kwargs["body"]
+    assert "cooperage-pull" in pod_body["metadata"]["name"]
 
 
 @patch("cooperage.orchestrator.kubernetes.time.sleep")
@@ -93,11 +93,10 @@ def test_remove_volume_creates_and_deletes_cleanup_pod(mock_mono, _mock_sleep):
     orch.remove_volume("cooperage-session-abc")
 
     core_api.create_namespaced_pod.assert_called_once()
-    # delete is called in _delete_pod (in finally) + potentially in _delete_pod before create
     assert core_api.delete_namespaced_pod.call_count >= 1
 
-    meta_calls = [str(c) for c in client.V1ObjectMeta.call_args_list]
-    assert any("cooperage-cleanup" in c for c in meta_calls)
+    pod_body = core_api.create_namespaced_pod.call_args.kwargs["body"]
+    assert "cooperage-cleanup" in pod_body["metadata"]["name"]
 
 
 @patch("cooperage.orchestrator.kubernetes.time.sleep")
@@ -155,9 +154,11 @@ def test_start_container_passes_env_vars(_mock_port):
     orch = _make_orch(client)
     orch.start_container(server_def, session)
 
-    env_calls = {call.kwargs["name"]: call.kwargs["value"] for call in client.V1EnvVar.call_args_list}
-    assert env_calls["COOPERAGE_SESSION_ID"] == session.id
-    assert env_calls["MY_VAR"] == "hello"
+    pod_body = core_api.create_namespaced_pod.call_args.kwargs["body"]
+    env = pod_body["spec"]["containers"][0]["env"]
+    env_dict = {e["name"]: e["value"] for e in env}
+    assert env_dict["COOPERAGE_SESSION_ID"] == session.id
+    assert env_dict["MY_VAR"] == "hello"
 
 
 @patch.object(KubernetesOrchestrator, "pick_free_port", return_value=30004)
@@ -171,10 +172,27 @@ def test_start_container_mounts_workspace_hostpath(_mock_port):
     from cooperage.core.config import settings
     orch.start_container(server_def, session)
 
-    host_path_call = client.V1HostPathVolumeSource.call_args
-    path_arg = host_path_call.kwargs["path"]
-    assert session.volume_name in path_arg
-    assert settings.k8s_host_path_prefix in path_arg
+    pod_body = core_api.create_namespaced_pod.call_args.kwargs["body"]
+    host_path = pod_body["spec"]["volumes"][0]["hostPath"]["path"]
+    assert session.volume_name in host_path
+    assert settings.k8s_host_path_prefix in host_path
+
+
+@patch.object(KubernetesOrchestrator, "pick_free_port", return_value=30005)
+def test_start_container_sets_pod_affinity(_mock_port):
+    client, core_api = _make_mock_k8s_client()
+
+    session = _make_session()
+    server_def = ServerDef(name="sim", image="sim:latest")
+
+    orch = _make_orch(client)
+    orch.start_container(server_def, session)
+
+    pod_body = core_api.create_namespaced_pod.call_args.kwargs["body"]
+    affinity = pod_body["spec"]["affinity"]
+    term = affinity["podAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][0]
+    assert term["labelSelector"]["matchLabels"]["cooperage.session"] == session.id
+    assert term["topologyKey"] == "kubernetes.io/hostname"
 
 
 # ── stop_container ────────────────────────────────────────────────────────────

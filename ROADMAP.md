@@ -5,7 +5,7 @@
 ### Core
 - [x] MCP gateway with core tools — `list_servers`, `create_session`, `end_session`, `list_sessions`, `call_tool`, `list_tools`, `pull_server`
 - [x] Docker orchestrator — ephemeral containers, shared `/workspace` volume per session, TTL + idle cleanup
-- [x] Kubernetes orchestrator — drop-in backend, Pods + NodePort Services + hostPath workspace, `cooperage init-k8s`
+- [x] Kubernetes orchestrator — drop-in backend, Pods + NodePort Services + hostPath workspace, `cooperage init-k8s`, pod affinity for multi-node
 - [x] Built-in workspace server — `workspace_write/read/list/delete`, auto-registered, pre-warmed on session create
 - [x] Built-in compute server — `run_script` (Python) and `run_bash`, numpy/pandas/scipy/matplotlib/sklearn pre-installed, `uv` for live package installs
 - [x] File-based session persistence — stdio and SSE gateway share state via `~/.cooperage/sessions.json`
@@ -31,7 +31,7 @@
 - [x] `cooperage ui` — local Streamlit viewer with session selector, container panel, file preview, upload
 - [x] Image preview — binary files base64-encoded, rendered in browser
 - [x] `simulator` + `analysis` example servers
-- [x] 156 unit tests (mocked) + cloud integration test suite against live droplet
+- [x] 161 unit tests (mocked) + cloud integration test suite against live droplet
 - [x] MIT license, cooperage-io GitHub org
 
 ---
@@ -56,8 +56,8 @@ The LLM should prefer registered domain-specific servers when available, and fal
 - **Fly.io / Railway backend** — simpler cloud alternative to K8s or bare Docker VM
 - **Resource usage telemetry** — CPU/memory per container, exposed as a gateway tool or resource
 - **`cooperage deploy` CLI** — thin wrapper to provision cloud infra (droplet or K8s) and deploy the stack
-- **K8s: RWX PVC workspace** — replace hostPath for multi-node clusters
-- **K8s: private registry support** — `imagePullSecrets` config
+- **K8s: RWX PVC workspace** — optional alternative to hostPath + pod affinity for clusters with RWX StorageClass
+- **K8s: Ingress support** — replace NodePort with Ingress/ClusterIP for production on-prem routing
 - **K8s: Helm chart** — gateway as a Deployment with ServiceAccount + ClusterRole + ConfigMap
 - **Session sharing** — read-only `session_id` tokens so a user can watch a session without write access
 - **Webhook / event stream** — push session/container lifecycle events to an external URL
