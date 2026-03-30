@@ -222,8 +222,9 @@ async def pull_server(server_name: str, **kwargs) -> dict:
         "Create a new Cooperage workspace session. "
         "Returns a session_id. All containers started within this session "
         "share a /workspace volume for data exchange. "
-        "If a ui_url is returned, share it with the user so they can monitor "
-        "their session's files and containers in real time."
+        "IMPORTANT: if the response includes a ui_url, you MUST share it with "
+        "the user immediately as a clickable link — they use it to monitor "
+        "files and containers in real time."
     ),
     params={"name": {"type": "string", "description": "Optional human-readable name for the session"}},
     required=[],

@@ -253,9 +253,14 @@ def list_sessions() -> list[dict]:
 
 
 def workspace_list(session_id: str) -> list[str]:
-    raw = call_tool("cooperage_workspace_list", {"session_id": session_id})
+    try:
+        raw = call_tool("cooperage_workspace_list", {"session_id": session_id})
+    except Exception:
+        return []  # container still warming up — next auto-refresh will retry
     if not raw:
         return []
+    if raw.startswith("Error"):
+        return []  # gateway returned an error (container not ready, etc.)
     try:
         return json.loads(raw)
     except Exception:
@@ -455,7 +460,7 @@ def main_content() -> None:
         st.subheader("Workspace")
         files = workspace_list(session_id)
         if not files:
-            st.caption("Workspace is empty.")
+            st.caption("Workspace is empty — files will appear here once containers write to /workspace.")
             st.session_state["selected_file"] = None
         else:
             _render_tree(_build_tree(files))
