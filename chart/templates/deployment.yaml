@@ -40,6 +40,11 @@ spec:
                   name: cooperage-gateway-secrets
                   key: jwt-secret
           {{- end }}
+          {{- if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data/cooperage
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           readinessProbe:
@@ -54,3 +59,9 @@ spec:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 30
+      {{- if .Values.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: cooperage-gateway-data
+      {{- end }}

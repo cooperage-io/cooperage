@@ -33,6 +33,7 @@ class DockerOrchestrator(Orchestrator):
         return self._client
 
     def pull_image(self, image: str) -> str:
+        image = self.resolve_image(image)
         logger.info("Pulling image %s", image)
         img = self.client.images.pull(image)
         logger.info("Pulled image %s → %s", image, img.id[:19])
@@ -148,7 +149,7 @@ class DockerOrchestrator(Orchestrator):
                 network_mode = session.network_name
 
         container = self.client.containers.run(
-            image=server_def.image,
+            image=self.resolve_image(server_def.image),
             name=container_name,
             detach=True,
             remove=False,

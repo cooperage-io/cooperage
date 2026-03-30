@@ -87,6 +87,7 @@ class KubernetesOrchestrator(Orchestrator):
 
     def pull_image(self, image: str) -> str:
         """Pre-pull an image onto the node by running a short-lived Pod."""
+        image = self.resolve_image(image)
         safe = image.lower()
         for ch in "/:.@":
             safe = safe.replace(ch, "-")
@@ -283,7 +284,7 @@ class KubernetesOrchestrator(Orchestrator):
             },
             "containers": [{
                 "name": server_def.name,
-                "image": server_def.image,
+                "image": self.resolve_image(server_def.image),
                 "ports": [{"containerPort": server_def.port}],
                 "env": env,
                 "resources": {

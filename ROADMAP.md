@@ -8,7 +8,7 @@
 - [x] Kubernetes orchestrator — drop-in backend, Pods + NodePort Services + hostPath workspace, `cooperage init-k8s`, pod affinity for multi-node
 - [x] Built-in workspace server — `workspace_write/read/list/delete`, auto-registered, pre-warmed on session create
 - [x] Built-in compute server — `run_script` (Python) and `run_bash`, numpy/pandas/scipy/matplotlib/sklearn pre-installed, `uv` for live package installs
-- [x] File-based session persistence — stdio and SSE gateway share state via `~/.cooperage/sessions.json`
+- [x] File-based session persistence — stdio and SSE gateway share state via configurable path
 - [x] Container idle timeout + session activity TTL extension
 - [x] Network isolation — per-session bridge networks
 - [x] Resource limits — CPU/memory configurable at registration and via config
@@ -22,7 +22,7 @@
 
 ### Deployment
 - [x] DigitalOcean droplet — gateway + UI running in production at `137.184.119.104`
-- [x] All images published to Docker Hub under `elavizadeh/`
+- [x] All images published to `ghcr.io/cooperage-io/` via GitHub Actions CI
 - [x] Hosted Streamlit UI — live session/container/workspace viewer at port 8501
 - [x] `cooperage start --proxy <url>` — Claude Desktop (stdio) → remote cloud gateway bridge
 - [x] `COOPERAGE_UI_URL` — gateway returns session-scoped UI link in `create_session` response
@@ -35,6 +35,9 @@
 - [x] MIT license, cooperage-io GitHub org
 - [x] Helm chart — gateway Deployment + ServiceAccount + Role + ConfigMap + Ingress + UI sidecar
 - [x] `/health` endpoint — K8s liveness/readiness probes
+- [x] Persistent gateway state — PVC for sessions.json + registry.json
+- [x] Image registry prefix — `COOPERAGE_IMAGE_REGISTRY_PREFIX` for air-gapped clusters
+- [x] CI — GitHub Actions for tests + image publishing
 
 ---
 

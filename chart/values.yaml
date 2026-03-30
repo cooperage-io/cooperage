@@ -53,6 +53,19 @@ kubernetes:
   nodePortRangeStart: 30000
   nodePortRangeEnd: 32767
 
+# -- Image registry prefix for workload containers (air-gapped clusters)
+# If set, all MCP server images will be prefixed with this registry.
+# e.g. "registry.corp.internal/" turns "cooperage-compute:latest"
+# into "registry.corp.internal/cooperage-compute:latest"
+imageRegistryPrefix: ""
+
+# -- Persistent state (sessions.json + registry.json survive pod restarts)
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
 # -- Network isolation (NetworkPolicy per session)
 networkIsolation: true
 

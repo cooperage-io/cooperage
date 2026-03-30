@@ -12,6 +12,10 @@ data:
   COOPERAGE_K8S_HOST_PATH_PREFIX: {{ .Values.kubernetes.hostPathPrefix | quote }}
   COOPERAGE_K8S_NODE_PORT_RANGE_START: {{ .Values.kubernetes.nodePortRangeStart | quote }}
   COOPERAGE_K8S_NODE_PORT_RANGE_END: {{ .Values.kubernetes.nodePortRangeEnd | quote }}
+  {{- if .Values.persistence.enabled }}
+  COOPERAGE_SESSIONS_PATH: "/data/cooperage/sessions.json"
+  COOPERAGE_REGISTRY_PATH: "/data/cooperage/registry.json"
+  {{- end }}
   COOPERAGE_GATEWAY_HOST: "0.0.0.0"
   COOPERAGE_GATEWAY_PORT: "8080"
   COOPERAGE_SESSION_TTL_SECONDS: {{ .Values.session.ttlSeconds | quote }}
@@ -21,6 +25,9 @@ data:
   COOPERAGE_DEFAULT_CPU_LIMIT: {{ .Values.containerDefaults.cpuLimit | quote }}
   COOPERAGE_DEFAULT_MEMORY_LIMIT: {{ .Values.containerDefaults.memoryLimit | quote }}
   COOPERAGE_NETWORK_ISOLATION: {{ .Values.networkIsolation | quote }}
+  {{- if .Values.imageRegistryPrefix }}
+  COOPERAGE_IMAGE_REGISTRY_PREFIX: {{ .Values.imageRegistryPrefix | quote }}
+  {{- end }}
   COOPERAGE_AUTH_ENABLED: {{ .Values.auth.enabled | quote }}
   {{- if .Values.auth.oidc.issuerUrl }}
   COOPERAGE_OIDC_ISSUER_URL: {{ .Values.auth.oidc.issuerUrl | quote }}

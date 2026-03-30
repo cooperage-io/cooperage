@@ -71,6 +71,14 @@ class Orchestrator(ABC):
                     return port
         raise RuntimeError(f"No free ports available in range {start}-{end}")
 
+    @staticmethod
+    def resolve_image(image: str) -> str:
+        """Prepend the configured registry prefix to an image name."""
+        from cooperage.core.config import settings
+        if settings.image_registry_prefix and not image.startswith(settings.image_registry_prefix):
+            return f"{settings.image_registry_prefix}{image}"
+        return image
+
     def _resolve_resource_limits(self, server_def: ServerDef) -> tuple[str, str]:
         """Return (cpu, memory) limits — server-level overrides > global defaults."""
         from cooperage.core.config import settings

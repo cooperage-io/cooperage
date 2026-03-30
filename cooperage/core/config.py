@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     k8s_node_port_range_end: int = 32767
     k8s_host_path_prefix: str = "/run/cooperage"
 
+    # ── Image registry prefix (air-gapped / internal mirror) ────────────────
+    image_registry_prefix: str = ""  # e.g. "registry.corp.internal/"
+
     # ── Authentication ───────────────────────────────────────────────────────
     auth_enabled: bool = False  # Set True for enterprise deployments
     api_keys_path: Path | None = None  # Path to API keys JSON file
