@@ -14,6 +14,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 import secrets
 import tarfile
 from urllib.parse import urlencode
@@ -611,15 +612,14 @@ def main_content() -> None:
 _handle_oidc_callback()
 
 # Render auth sidebar
-import os as _os
-_here = _os.path.dirname(_os.path.abspath(__file__))
+_here = os.path.dirname(os.path.abspath(__file__))
 _logo_path = next((
     p for p in [
-        _os.path.join(_here, "..", "assets", "logo.png"),  # local dev
-        _os.path.join(_here, "logo.png"),                  # Docker
-    ] if _os.path.exists(p)
+        os.path.join(_here, "..", "assets", "logo.png"),  # local dev
+        os.path.join(_here, "logo.png"),                  # Docker
+    ] if os.path.exists(p)
 ), None)
-del _os, _here
+del _here
 if _logo_path:
     st.image(_logo_path, width=320)
 else:

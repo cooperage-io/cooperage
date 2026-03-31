@@ -4,7 +4,6 @@ idle container cleanup, and cross-process session loading.
 """
 import json
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest

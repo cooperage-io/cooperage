@@ -33,7 +33,7 @@ def analyze_scenes(image_paths: list[str]) -> str:
     for image_path in image_paths:
         img_path = WORKSPACE / image_path
         if not img_path.exists():
-            results[image_path] = f"not found in /workspace"
+            results[image_path] = "not found in /workspace"
             continue
         pixels = np.array(Image.open(img_path).convert("RGB"))
         results[image_path] = {

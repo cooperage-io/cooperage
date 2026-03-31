@@ -3,8 +3,7 @@ Orchestrator tests — all Docker SDK calls are mocked.
 We never touch a real Docker daemon here.
 """
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch, PropertyMock
-import pytest
+from unittest.mock import MagicMock, patch
 
 from cooperage.core.models import ContainerInfo, ServerDef, Session
 from cooperage.orchestrator.docker import DockerOrchestrator

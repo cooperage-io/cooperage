@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cooperage.core.auth import AuthContext
-from cooperage.core.models import ContainerInfo, ServerDef, Session
+from cooperage.core.models import ServerDef, Session
 
 _DEFAULT_AUTH = AuthContext(tenant_id="default")
 _TENANT_AUTH = AuthContext(tenant_id="acme")
@@ -253,7 +253,7 @@ def test_list_sessions_tool_filters_by_tenant(mock_list):
     mock_list.return_value = [s]
     from cooperage.gateway.server import list_sessions_tool
     auth = AuthContext(tenant_id="acme")
-    result = list_sessions_tool(auth=auth)
+    list_sessions_tool(auth=auth)
     mock_list.assert_called_once_with(tenant_id="acme")
 
 

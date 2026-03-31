@@ -2,7 +2,6 @@
 Session manager tests — orchestrator calls are mocked so no Docker daemon needed.
 Global module state is reset before each test via the `clean_sessions` fixture.
 """
-from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 import pytest
 

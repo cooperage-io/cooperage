@@ -244,7 +244,7 @@ async def test_proxy_call_tool_raises_on_mcp_error(mock_get_client, mock_ensure)
 async def test_workspace_write_proxies_to_workspace_server(mock_proxy):
     mock_proxy.return_value = json.dumps({"written": "plan.md", "bytes": 42})
     from cooperage.gateway.server import _workspace_op
-    result = await _workspace_op("s1", "workspace_write", {"path": "plan.md", "content": "# Plan"})
+    await _workspace_op("s1", "workspace_write", {"path": "plan.md", "content": "# Plan"})
     mock_proxy.assert_called_once_with("s1", "__workspace__", "workspace_write", {"path": "plan.md", "content": "# Plan"})
 
 

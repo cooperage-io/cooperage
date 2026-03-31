@@ -3,7 +3,6 @@ Simulator server tests — filesystem interactions use tmp_path, no Docker neede
 """
 import json
 import pytest
-from pathlib import Path
 
 
 @pytest.fixture(autouse=True)

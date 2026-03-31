@@ -4,7 +4,6 @@ No real cluster required.
 """
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
-import pytest
 
 from cooperage.core.models import ContainerInfo, ServerDef, Session
 from cooperage.orchestrator.kubernetes import KubernetesOrchestrator
