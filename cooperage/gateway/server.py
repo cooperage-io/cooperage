@@ -602,6 +602,53 @@ async def _proxy_call_tool(
     return result
 
 
+# ── Container logs endpoint ────────────────────────────────────────────────────
+
+async def _handle_logs(scope, receive, send) -> None:
+    """Handle GET /logs/{session_id}/{container_id}?tail=100"""
+    from urllib.parse import parse_qs
+
+    try:
+        headers = {k.decode(): v.decode() for k, v in scope.get("headers", [])}
+        auth = authenticate_request(headers)
+    except PermissionError as e:
+        await _send_json_response(send, 401, {"error": str(e)})
+        return
+
+    path = scope.get("path", "")
+    parts = path.strip("/").split("/")
+    # /logs/{session_id}/{container_id}
+    if len(parts) < 3:
+        await _send_json_response(send, 400, {"error": "Expected /logs/{session_id}/{container_id}"})
+        return
+
+    session_id = parts[1]
+    container_id = parts[2]
+
+    # Verify session exists and belongs to this tenant
+    session = sessions.get_session(session_id)
+    if session is None:
+        await _send_json_response(send, 404, {"error": f"Session {session_id} not found"})
+        return
+    if auth.tenant_id != "default" and session.tenant_id != auth.tenant_id:
+        await _send_json_response(send, 403, {"error": "Access denied"})
+        return
+
+    # Verify container belongs to this session
+    valid_ids = set(session.containers.values())
+    if container_id not in valid_ids:
+        await _send_json_response(send, 404, {"error": f"Container {container_id} not in session"})
+        return
+
+    qs = parse_qs(scope.get("query_string", b"").decode())
+    tail = int(qs.get("tail", ["100"])[0])
+
+    orch = get_orchestrator()
+    logs = await asyncio.to_thread(orch.get_container_logs, container_id, tail)
+
+    await _send_json_response(send, 200, {"container_id": container_id, "logs": logs})
+
+
 # ── Upload endpoint ───────────────────────────────────────────────────────────
 
 async def _send_json_response(send, status: int, body: dict) -> None:
@@ -752,6 +799,10 @@ async def run_sse(host: str | None = None, port: int | None = None) -> None:
                     await _send_json_response(send, 404, {"error": "OIDC not configured"})
                 else:
                     await _send_json_response(send, 200, oidc)
+                return
+
+            if scope["type"] == "http" and scope.get("path", "").startswith("/logs/"):
+                await _handle_logs(scope, receive, send)
                 return
 
             if scope["type"] == "http" and scope.get("path", "").startswith("/upload/"):

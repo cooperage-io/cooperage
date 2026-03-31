@@ -260,6 +260,20 @@ def list_servers() -> list[dict]:
     return data
 
 
+def fetch_container_logs(session_id: str, container_id: str, tail: int = 100) -> str:
+    try:
+        resp = httpx.get(
+            f"{_gateway_base()}/logs/{session_id}/{container_id}",
+            params={"tail": tail},
+            headers=_auth_headers(),
+            timeout=5,
+        )
+        resp.raise_for_status()
+        return resp.json().get("logs", "")
+    except Exception as e:
+        return f"(could not fetch logs: {e})"
+
+
 def workspace_list(session_id: str) -> list[str]:
     try:
         raw = call_tool("cooperage_workspace_list", {"session_id": session_id})
@@ -485,10 +499,12 @@ def main_content() -> None:
                             except Exception as e:
                                 st.error(f"Failed to start {name}: {e}")
 
-    # Clear selected file when switching sessions
+    # Clear selections when switching sessions
     if st.session_state.get("_session_id") != session_id:
         st.session_state["_session_id"] = session_id
         st.session_state["selected_file"] = None
+        st.session_state["_selected_container"] = None
+        st.session_state["_selected_container_name"] = None
 
     col_containers, col_files, col_preview = st.columns([1, 1, 2])
 
@@ -499,13 +515,40 @@ def main_content() -> None:
         if not containers:
             st.caption("No containers running yet.")
         for c in containers:
+            cid = c.get("container_id")
+            name = c["server_name"]
+            is_selected = st.session_state.get("_selected_container") == cid
+
             if c.get("status") == "warming":
-                st.warning(f"⏳ **{c['server_name']}** warming...")
-            elif c["builtin"]:
-                st.success(f"🟢 **{c['server_name']}** `{c['container_id'][:12]}`")
-            else:
-                st.info(f"🔵 **{c['server_name']}** `{c['container_id'][:12]}`")
+                st.warning(f"⏳ **{name}** warming...")
+            elif cid:
+                icon = "🟢" if c["builtin"] else "🔵"
+                if st.button(
+                    f"{icon} {name}  `{cid[:12]}`",
+                    key=f"ctr__{cid}",
+                    use_container_width=True,
+                    type="primary" if is_selected else "secondary",
+                ):
+                    if is_selected:
+                        st.session_state["_selected_container"] = None
+                    else:
+                        st.session_state["_selected_container"] = cid
+                        st.session_state["_selected_container_name"] = name
         st.caption("🟢 Built-in  🔵 Add-on  ⏳ Warming")
+        st.caption("Click a container to view its logs.")
+
+        # ── Log viewer ────────────────────────────────────────────────────────
+        selected_cid = st.session_state.get("_selected_container")
+        if selected_cid:
+            cname = st.session_state.get("_selected_container_name", selected_cid[:12])
+            st.divider()
+            st.markdown(f"**Terminal — {cname}**")
+            tail = st.select_slider(
+                "Lines", options=[50, 100, 200, 500], value=100,
+                key="log_tail",
+            )
+            logs = fetch_container_logs(session_id, selected_cid, tail=tail)
+            st.code(logs, language="text")
 
     # ── Workspace panel ───────────────────────────────────────────────────────
     with col_files:

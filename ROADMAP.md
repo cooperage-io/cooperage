@@ -65,3 +65,4 @@ The LLM should prefer registered domain-specific servers when available, and fal
 - **K8s: Ingress support** — replace NodePort with Ingress/ClusterIP for production on-prem routing
 - **Session sharing** — read-only `session_id` tokens so a user can watch a session without write access
 - **Webhook / event stream** — push session/container lifecycle events to an external URL
+- **Server search / lazy listing** — `cooperage_search_servers` tool that accepts a query and returns matching servers by name/description, so large registries don't flood the context window. `cooperage_list_servers` would return names only (no descriptions) by default, with descriptions opt-in via a flag.
