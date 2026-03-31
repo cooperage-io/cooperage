@@ -101,7 +101,7 @@ def test_authenticate_jwt_no_secret_returns_none(monkeypatch):
 
 def test_authenticate_jwt_valid(monkeypatch):
     import jwt
-    secret = "test-secret"
+    secret = "test-secret-padded-to-32-bytes!!"
     monkeypatch.setattr("cooperage.core.auth.settings.jwt_secret", secret)
     token = jwt.encode({"tenant_id": "acme"}, secret, algorithm="HS256")
     ctx = authenticate_jwt(token)
@@ -111,7 +111,7 @@ def test_authenticate_jwt_valid(monkeypatch):
 
 def test_authenticate_jwt_with_tenant_config(monkeypatch):
     import jwt
-    secret = "test-secret"
+    secret = "test-secret-padded-to-32-bytes!!"
     monkeypatch.setattr("cooperage.core.auth.settings.jwt_secret", secret)
     auth_module._tenants["acme"] = TenantConfig(tenant_id="acme", max_sessions=10)
     token = jwt.encode({"tenant_id": "acme"}, secret, algorithm="HS256")
@@ -121,7 +121,7 @@ def test_authenticate_jwt_with_tenant_config(monkeypatch):
 
 def test_authenticate_jwt_missing_tenant_id_returns_none(monkeypatch):
     import jwt
-    secret = "test-secret"
+    secret = "test-secret-padded-to-32-bytes!!"
     monkeypatch.setattr("cooperage.core.auth.settings.jwt_secret", secret)
     token = jwt.encode({"sub": "user1"}, secret, algorithm="HS256")
     assert authenticate_jwt(token) is None
@@ -129,14 +129,14 @@ def test_authenticate_jwt_missing_tenant_id_returns_none(monkeypatch):
 
 def test_authenticate_jwt_wrong_secret_returns_none(monkeypatch):
     import jwt
-    monkeypatch.setattr("cooperage.core.auth.settings.jwt_secret", "correct-secret")
-    token = jwt.encode({"tenant_id": "acme"}, "wrong-secret", algorithm="HS256")
+    monkeypatch.setattr("cooperage.core.auth.settings.jwt_secret", "correct-secret-padded-to-32-bytes!")
+    token = jwt.encode({"tenant_id": "acme"}, "wrong-secret-padded-to-32-bytes!!", algorithm="HS256")
     assert authenticate_jwt(token) is None
 
 
 def test_authenticate_jwt_expired_returns_none(monkeypatch):
     import jwt
-    secret = "test-secret"
+    secret = "test-secret-padded-to-32-bytes!!"
     monkeypatch.setattr("cooperage.core.auth.settings.jwt_secret", secret)
     token = jwt.encode({"tenant_id": "acme", "exp": int(time.time()) - 60}, secret, algorithm="HS256")
     assert authenticate_jwt(token) is None
