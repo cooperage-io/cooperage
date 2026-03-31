@@ -180,7 +180,7 @@ All settings use the `COOPERAGE_` prefix and can go in a `.env` file. See [`.env
 | `COOPERAGE_ORCHESTRATOR` | `docker` | `docker` or `kubernetes` |
 | `COOPERAGE_SESSION_TTL_SECONDS` | `1800` | Session auto-expiry |
 | `COOPERAGE_CONTAINER_IDLE_TIMEOUT` | `600` | Stop idle containers after N seconds |
-| `COOPERAGE_CONTAINER_STARTUP_TIMEOUT` | `30` | Seconds to wait for container readiness |
+| `COOPERAGE_CONTAINER_STARTUP_TIMEOUT` | `120` | Seconds to wait for container readiness |
 | `COOPERAGE_DEFAULT_CPU_LIMIT` | `1.0` | CPU limit per container |
 | `COOPERAGE_DEFAULT_MEMORY_LIMIT` | `512m` | Memory limit per container |
 | `COOPERAGE_NETWORK_ISOLATION` | `true` | Per-session network isolation |
