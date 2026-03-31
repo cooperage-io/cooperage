@@ -246,16 +246,15 @@ async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -
         task = asyncio.create_task(_warmup_builtin(session.id, server_def))
         tasks.append(task)
     _warmup_tasks[session.id] = tasks
-    result = {
-        "session_id": session.id,
-        "name": session.name,
-        "tenant_id": session.tenant_id,
-        "volume": session.volume_name,
-        "expires_at": session.expires_at.isoformat(),
-    }
+    lines = [
+        f"Session created. session_id: {session.id}",
+        f"Workspace volume: {session.volume_name}",
+        f"Expires: {session.expires_at.isoformat()}",
+    ]
     if _settings.ui_url:
-        result["ui_url"] = f"{_settings.ui_url.rstrip('/')}/?session={session.id}"
-    return result
+        ui_url = f"{_settings.ui_url.rstrip('/')}/?session={session.id}"
+        lines.append(f"IMPORTANT: Share this link with the user so they can monitor files and containers in real time: {ui_url}")
+    return "\n".join(lines)
 
 
 @tool(

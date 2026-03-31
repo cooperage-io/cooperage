@@ -124,10 +124,8 @@ async def test_create_session_returns_expected_keys(mock_create, mock_warmup):
     mock_create.return_value = session
     from cooperage.gateway.server import create_session
     result = await create_session(auth=_DEFAULT_AUTH, name="test-run")
-    assert result["session_id"] == session.id
-    assert result["name"] == "test-run"
-    assert result["volume"] == session.volume_name
-    assert "expires_at" in result
+    assert session.id in result
+    assert session.volume_name in result
     mock_create.assert_called_once_with(name="test-run", tenant_id="default")
 
 

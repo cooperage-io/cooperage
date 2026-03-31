@@ -112,7 +112,7 @@ async def test_create_session_under_quota_succeeds(mock_create, mock_count, mock
     auth = AuthContext(tenant_id="acme", max_sessions=5)
     from cooperage.gateway.server import create_session
     result = await create_session(auth=auth)
-    assert result["session_id"] == session.id
+    assert session.id in result
 
 
 # ── create_session ui_url ─────────────────────────────────────────────────────
@@ -137,8 +137,8 @@ async def test_create_session_includes_ui_url(mock_create, mock_warmup, monkeypa
     ))
     from cooperage.gateway.server import create_session
     result = await create_session(auth=_DEFAULT_AUTH)
-    assert "ui_url" in result
-    assert session.id in result["ui_url"]
+    assert "http://localhost:8501" in result
+    assert session.id in result
 
 
 @pytest.mark.asyncio
