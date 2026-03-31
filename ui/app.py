@@ -25,7 +25,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="Cooperage",
-    page_icon="🪵",
+    page_icon="🛢️",
     layout="wide",
 )
 
@@ -252,6 +252,14 @@ def list_sessions() -> list[dict]:
     return data
 
 
+def list_servers() -> list[dict]:
+    raw = call_tool("cooperage_list_servers", {})
+    data = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(data, list):
+        return []
+    return data
+
+
 def workspace_list(session_id: str) -> list[str]:
     try:
         raw = call_tool("cooperage_workspace_list", {"session_id": session_id})
@@ -421,8 +429,21 @@ def main_content() -> None:
         st.error(f"Failed to list sessions: {e}")
         return
 
+    # ── Registered servers (sidebar) ─────────────────────────────────────────
+    try:
+        servers = list_servers()
+    except Exception:
+        servers = []
+
     if not all_sessions:
         st.info("No active sessions. Create one in Claude Desktop with `cooperage_create_session`.")
+        if servers:
+            with st.sidebar.expander("📦 Registered Servers", expanded=True):
+                for srv in servers:
+                    cached = "✅" if srv.get("cached") else "⬇️"
+                    st.markdown(f"{cached} **{srv['name']}**")
+                    if srv.get("description"):
+                        st.caption(srv["description"])
         return
 
     session_names = {
@@ -432,6 +453,37 @@ def main_content() -> None:
     selected_label = st.selectbox("Session", list(session_names.keys()))
     session_id = session_names[selected_label]
     session = next(s for s in all_sessions if s["session_id"] == session_id)
+
+    # ── Servers sidebar with Start buttons ────────────────────────────────────
+    if servers:
+        running_servers = {c["server_name"] for c in session.get("containers", [])}
+        with st.sidebar.expander("📦 Registered Servers", expanded=True):
+            for srv in servers:
+                name = srv["name"]
+                cached = "✅" if srv.get("cached") else "⬇️"
+                is_running = name in running_servers
+
+                col_name, col_btn = st.columns([3, 1])
+                with col_name:
+                    if is_running:
+                        st.markdown(f"🟢 **{name}**")
+                    else:
+                        st.markdown(f"{cached} **{name}**")
+                    if srv.get("description"):
+                        st.caption(srv["description"])
+                with col_btn:
+                    if is_running:
+                        st.caption("Running")
+                    elif st.button("Start", key=f"start_srv__{name}", use_container_width=True):
+                        with st.spinner(f"Starting {name}..."):
+                            try:
+                                call_tool("cooperage_list_tools", {
+                                    "session_id": session_id,
+                                    "server_name": name,
+                                })
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to start {name}: {e}")
 
     # Clear selected file when switching sessions
     if st.session_state.get("_session_id") != session_id:
@@ -516,7 +568,19 @@ def main_content() -> None:
 _handle_oidc_callback()
 
 # Render auth sidebar
-st.title("🪵 Cooperage")
+import os as _os
+_here = _os.path.dirname(_os.path.abspath(__file__))
+_logo_path = next((
+    p for p in [
+        _os.path.join(_here, "..", "assets", "logo.png"),  # local dev
+        _os.path.join(_here, "logo.png"),                  # Docker
+    ] if _os.path.exists(p)
+), None)
+del _os, _here
+if _logo_path:
+    st.image(_logo_path, width=320)
+else:
+    st.title("Cooperage")
 _render_auth_sidebar()
 
 # Main content
