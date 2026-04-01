@@ -191,6 +191,7 @@ All settings use the `COOPERAGE_` prefix and can go in a `.env` file. See [`.env
 | `COOPERAGE_OIDC_AUDIENCE` | — | Expected `aud` claim |
 | `COOPERAGE_OIDC_CLIENT_ID` | — | OAuth2 client ID (enables SSO in UI) |
 | `COOPERAGE_UI_URL` | — | UI base URL (shown to users after session creation) |
+| `COOPERAGE_AUDIT_LOG_PATH` | — | Path to JSON-lines audit log (tool calls, sessions, containers) |
 | `COOPERAGE_K8S_NAMESPACE` | `cooperage` | Kubernetes namespace |
 
 ## CLI

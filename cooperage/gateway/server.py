@@ -23,6 +23,7 @@ import cooperage.registry.registry as registry
 import cooperage.session.manager as sessions
 from cooperage.orchestrator import get_orchestrator
 from cooperage.core.auth import AuthContext, authenticate_request, check_server_access, get_oidc_config, load_api_keys
+from cooperage.core.audit import AuditEvent, AuditEventType, emit as audit_emit, measure as audit_measure, elapsed_ms as audit_elapsed_ms
 from cooperage.core.models import ContainerInfo, ServerDef
 
 logger = logging.getLogger(__name__)
@@ -239,6 +240,12 @@ async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -
             )
 
     session = sessions.create_session(name=name, tenant_id=auth.tenant_id)
+    audit_emit(AuditEvent(
+        event_type=AuditEventType.SESSION_CREATE,
+        session_id=session.id,
+        tenant_id=auth.tenant_id,
+        metadata={"name": name, "volume": session.volume_name},
+    ))
     servers_to_warm = [_WORKSPACE_SERVER_DEF, _COMPUTE_SERVER_DEF]
     _warming[session.id] = {s.name for s in servers_to_warm}
     tasks = []
@@ -313,7 +320,13 @@ async def end_session(session_id: str, **kwargs) -> dict:
     for task in _warmup_tasks.pop(session_id, []):
         task.cancel()
     _warming.pop(session_id, None)
+    auth = _auth_ctx.get()
     ok = sessions.end_session(session_id)
+    audit_emit(AuditEvent(
+        event_type=AuditEventType.SESSION_END,
+        session_id=session_id,
+        tenant_id=auth.tenant_id,
+    ))
     return {"ended": ok, "session_id": session_id}
 
 
@@ -446,20 +459,37 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
         raise ValueError(f"Unknown tool: {name!r}")
 
     auth = _auth_ctx.get()
+    start = audit_measure()
+    error_msg = None
+    try:
+        # Auto-check session tenant ownership
+        if entry["requires_session"] and "session_id" in args:
+            _check_session_tenant(args["session_id"], auth)
 
-    # Auto-check session tenant ownership
-    if entry["requires_session"] and "session_id" in args:
-        _check_session_tenant(args["session_id"], auth)
+        # Auto-check server RBAC
+        if entry["requires_server"] and "server_name" in args:
+            check_server_access(auth, args["server_name"])
 
-    # Auto-check server RBAC
-    if entry["requires_server"] and "server_name" in args:
-        check_server_access(auth, args["server_name"])
-
-    handler = entry["handler"]
-    # Inject auth for handlers that accept it
-    if asyncio.iscoroutinefunction(handler):
-        return await handler(auth=auth, **args)
-    return handler(auth=auth, **args)
+        handler = entry["handler"]
+        if asyncio.iscoroutinefunction(handler):
+            result = await handler(auth=auth, **args)
+        else:
+            result = handler(auth=auth, **args)
+        return result
+    except Exception as e:
+        error_msg = str(e)
+        raise
+    finally:
+        audit_emit(AuditEvent(
+            event_type=AuditEventType.TOOL_CALL,
+            session_id=args.get("session_id"),
+            tenant_id=auth.tenant_id,
+            server_name=args.get("server_name"),
+            tool_name=name,
+            arguments={k: v for k, v in args.items() if k not in ("content", "data")},
+            duration_ms=audit_elapsed_ms(start),
+            error=error_msg,
+        ))
 
 
 def _check_session_tenant(session_id: str, auth: AuthContext) -> None:
@@ -553,7 +583,19 @@ async def _ensure_container(session_id: str, server_name: str) -> ContainerInfo:
     server_def = registry.get(server_name)
     if server_def is None:
         raise ValueError(f"No server named {server_name!r} in registry")
+    session = sessions.get_session(session_id)
+    already_running = session is not None and server_name in session.containers
+    start = audit_measure()
     info = await asyncio.to_thread(sessions.get_or_start_container, session_id, server_def)
+    if not already_running:
+        audit_emit(AuditEvent(
+            event_type=AuditEventType.CONTAINER_START,
+            session_id=session_id,
+            tenant_id=session.tenant_id if session else "default",
+            server_name=server_name,
+            duration_ms=audit_elapsed_ms(start),
+            metadata={"container_id": info.container_id, "image": server_def.image},
+        ))
     sessions.touch_container(session_id, server_name)
     sessions.touch_session(session_id)
     return info
@@ -751,6 +793,9 @@ async def run_stdio() -> None:
     """Run the gateway over stdio (for Claude Desktop / MCP CLI).
     No auth — stdio is always the default tenant."""
     from cooperage.session.manager import start_cleanup_thread
+    from cooperage.core.config import settings
+    from cooperage.core import audit
+    audit.init(settings.audit_log_path)
     _ensure_builtins_registered()
     start_cleanup_thread()
     try:
@@ -765,9 +810,11 @@ async def run_sse(host: str | None = None, port: int | None = None) -> None:
     """Run the gateway as a streamable HTTP server (POST /mcp)."""
     from cooperage.session.manager import start_cleanup_thread
     from cooperage.core.config import settings
+    from cooperage.core import audit
     import uvicorn
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
+    audit.init(settings.audit_log_path)
     _ensure_builtins_registered()
     load_api_keys()
     start_cleanup_thread()

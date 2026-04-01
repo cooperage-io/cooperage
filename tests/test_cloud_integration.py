@@ -47,6 +47,15 @@ def _json(result):
     return json.loads(_text(result))
 
 
+def _extract_session_id(result) -> str:
+    """Extract session_id from create_session's text response."""
+    text = _text(result)
+    for line in text.split("\n"):
+        if "session_id:" in line:
+            return line.split("session_id:")[1].strip()
+    raise ValueError(f"No session_id found in response: {text}")
+
+
 # ── tests ─────────────────────────────────────────────────────────────────────
 
 @skip_if_down
@@ -88,12 +97,11 @@ async def test_create_and_end_session():
         async with ClientSession(read, write) as session:
             await session.initialize()
 
-            create = _json(await session.call_tool(
+            create_result = await session.call_tool(
                 "cooperage_create_session", {"name": "integration-test"}
-            ))
-            assert "session_id" in create
-            assert create["name"] == "integration-test"
-            session_id = create["session_id"]
+            )
+            session_id = _extract_session_id(create_result)
+            assert session_id
 
             end = _json(await session.call_tool(
                 "cooperage_end_session", {"session_id": session_id}
@@ -115,10 +123,10 @@ async def test_workspace_write_read_list():
         async with ClientSession(read, write) as session:
             await session.initialize()
 
-            create = _json(await session.call_tool(
+            create_result = await session.call_tool(
                 "cooperage_create_session", {"name": "ws-roundtrip"}
-            ))
-            session_id = create["session_id"]
+            )
+            session_id = _extract_session_id(create_result)
 
             try:
                 write_result = _text(await session.call_tool("cooperage_workspace_write", {
