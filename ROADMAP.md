@@ -63,3 +63,4 @@
 - **Provenance / artifact lineage** — extend audit log to record which tool wrote which workspace file, enabling full artifact traceability across multi-container pipelines.
 - **Multi-agent demo** — orchestrator agent creates a session and passes `session_id` to parallel subagents, each calling a different server. Validates concurrent tool calls. Target framework: Claude Agent SDK.
 - **`cooperage.io` domain + public landing page** — set up domain, simple landing page with live demo link and install instructions.
+- **Audit log rotation** — cap audit log file size and keep N compressed backups (Python `RotatingFileHandler` or logrotate config). Currently grows unbounded.

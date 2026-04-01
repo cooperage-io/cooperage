@@ -244,14 +244,19 @@ async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -
             )
 
     session = sessions.create_session(name=name, tenant_id=auth.tenant_id)
-    audit_emit(AuditEvent(
+    
+    curr_event = AuditEvent(
         event_type=AuditEventType.SESSION_CREATE,
         session_id=session.id,
         tenant_id=auth.tenant_id,
         metadata={"name": name, "volume": session.volume_name},
-    ))
+    )
+
+    audit_emit(curr_event)
+
     servers_to_warm = [_WORKSPACE_SERVER_DEF, _COMPUTE_SERVER_DEF]
     _warming[session.id] = {s.name for s in servers_to_warm}
+    
     tasks = []
     for server_def in servers_to_warm:
         task = asyncio.create_task(_warmup_builtin(session.id, server_def))
