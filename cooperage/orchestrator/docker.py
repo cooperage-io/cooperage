@@ -121,7 +121,7 @@ class DockerOrchestrator(Orchestrator):
             creds = server_def.registry_credentials
             self.client.login(
                 username=creds.username,
-                password=creds.password,
+                password=creds.password.get_secret_value(),
                 registry=creds.server,
             )
             logger.info("Authenticated to registry %s", creds.server)

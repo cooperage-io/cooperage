@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 import uuid
 
 
@@ -13,7 +13,7 @@ class RegistryCredentials(BaseModel):
     """Credentials for pulling from a private image registry."""
     server: str  # e.g. "ghcr.io", "123456789.dkr.ecr.us-east-1.amazonaws.com"
     username: str
-    password: str
+    password: SecretStr
 
 
 class ServerDef(BaseModel):

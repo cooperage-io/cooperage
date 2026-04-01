@@ -217,12 +217,13 @@ class KubernetesOrchestrator(Orchestrator):
 
         secret_name = f"cooperage-regcred-{session.id[:8]}-{server_def.name}"[:63]
 
-        auth_str = base64.b64encode(f"{creds.username}:{creds.password}".encode()).decode()
+        secret = creds.password.get_secret_value()
+        auth_str = base64.b64encode(f"{creds.username}:{secret}".encode()).decode()
         docker_config = {
             "auths": {
                 creds.server: {
                     "username": creds.username,
-                    "password": creds.password,
+                    "password": secret,
                     "auth": auth_str,
                 }
             }
