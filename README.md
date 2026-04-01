@@ -230,7 +230,6 @@ Cooperage takes a different approach: there is no pre-built VM. The LLM dynamica
 - **Multi-tool pipelines** — containers with different dependencies composing through `/workspace`
 - **Enterprise auth and isolation** — OIDC, JWT, per-tenant RBAC, network policies, resource limits
 
-For a deeper comparison, see [docs/cooperage-vs-manus.md](docs/cooperage-vs-manus.md).
 
 ## Tests
 

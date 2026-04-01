@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     # ── Image registry auth ──────────────────────────────────────────────────
     registry_auth_path: Path | None = None  # Path to registry credentials JSON
 
+    # ── Audit logging ──────────────────────────────────────────────────────
+    audit_log_path: Path | None = None  # Path to JSON-lines audit log
+
 
 
 settings = Settings()

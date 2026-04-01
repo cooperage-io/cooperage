@@ -43,16 +43,7 @@
 
 ## Up Next
 
-### 1. Multi-agent demo
-Orchestrator agent creates a session and passes `session_id` to parallel subagents, each calling a different registered server. Subagents coordinate through `/workspace` — no explicit messaging needed. Validates concurrent tool calls and demonstrates Cooperage as a shared compute substrate for multi-agent pipelines.
-
-Target framework: Claude Agent SDK.
-
-### 2. `cooperage.io` domain + public landing page
-Set up domain, point at a simple landing page with a live demo link and install instructions.
-
-### 3. Smarter tool-use nudging
-The LLM should prefer registered domain-specific servers when available, and fall back to `run_script`/`run_bash` for general work. Current descriptions nudge too hard against the compute server in some cases. Needs prompt tuning + eval.
+(Prioritizing based on demo feedback and enterprise readiness)
 
 ---
 
@@ -66,3 +57,8 @@ The LLM should prefer registered domain-specific servers when available, and fal
 - **Session sharing** — read-only `session_id` tokens so a user can watch a session without write access
 - **Webhook / event stream** — push session/container lifecycle events to an external URL
 - **Server search / lazy listing** — `cooperage_search_servers` tool that accepts a query and returns matching servers by name/description, so large registries don't flood the context window. `cooperage_list_servers` would return names only (no descriptions) by default, with descriptions opt-in via a flag.
+- **Configurable output paths in example servers** — simulator should accept an `output_path` parameter instead of always overwriting `scene.png`. Prevents the copy-after-generate footgun in multi-step pipelines.
+- **Structured error handling** — tools should return structured error responses (error code, message, partial results) instead of null/silent failures. Critical for enterprise use where tools may run for minutes before failing.
+- **Audit logging / provenance** — log every tool call, container lifecycle event, and workspace file write with timestamps and session context. Enterprise deployments need full traceability on generated artifacts.
+- **Multi-agent demo** — orchestrator agent creates a session and passes `session_id` to parallel subagents, each calling a different server. Validates concurrent tool calls. Target framework: Claude Agent SDK.
+- **`cooperage.io` domain + public landing page** — set up domain, simple landing page with live demo link and install instructions.
