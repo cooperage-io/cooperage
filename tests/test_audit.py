@@ -197,8 +197,9 @@ async def test_dispatch_emits_error_on_handler_failure(mock_get_session, mock_au
     mock_get_session.return_value = None
     from cooperage.gateway.server import _dispatch, _auth_ctx
     token = _auth_ctx.set(AuthContext(tenant_id="default"))
+    from cooperage.core.errors import SessionNotFoundError
     try:
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(SessionNotFoundError, match="not found"):
             await _dispatch("cooperage_end_session", {"session_id": "nonexistent"})
     finally:
         _auth_ctx.reset(token)

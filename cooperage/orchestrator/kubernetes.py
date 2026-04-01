@@ -15,6 +15,7 @@ import time
 import logging
 
 from cooperage.core.config import settings
+from cooperage.core.errors import ImagePullError
 from cooperage.core.models import ContainerInfo, ServerDef, Session
 from cooperage.orchestrator.base import Orchestrator
 
@@ -63,13 +64,20 @@ class KubernetesOrchestrator(Orchestrator):
             "spec": spec,
         }
 
-    def _wait_for_pod(self, name: str, timeout: float = 30) -> None:
+    def _wait_for_pod(self, name: str, timeout: float = 30) -> str:
+        """Wait for a pod to reach a terminal state. Returns the phase.
+        Raises ImagePullError on timeout."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             p = self._core.read_namespaced_pod(name=name, namespace=self._ns)
-            if p.status.phase in ("Succeeded", "Failed"):
-                return
+            if p.status.phase == "Succeeded":
+                return "Succeeded"
+            if p.status.phase == "Failed":
+                return "Failed"
             time.sleep(2)
+        raise ImagePullError(
+            f"Pod {name!r} did not complete within {timeout}s (timed out)."
+        )
 
     def _delete_pod(self, name: str) -> None:
         try:
@@ -103,8 +111,12 @@ class KubernetesOrchestrator(Orchestrator):
         self._core.create_namespaced_pod(namespace=self._ns, body=pod)
         logger.info("K8s: pre-pulling image %s via pod %s", image, pod_name)
 
-        self._wait_for_pod(pod_name, timeout=max(settings.container_startup_timeout * 4, 120))
-        self._delete_pod(pod_name)
+        try:
+            phase = self._wait_for_pod(pod_name, timeout=max(settings.container_startup_timeout * 4, 120))
+        finally:
+            self._delete_pod(pod_name)
+        if phase == "Failed":
+            raise ImagePullError(f"Failed to pull image {image!r} — pull pod entered Failed state.")
         logger.info("K8s: image %s is now cached on node", image)
         return image
 

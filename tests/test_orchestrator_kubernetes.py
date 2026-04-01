@@ -5,6 +5,8 @@ No real cluster required.
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from cooperage.core.models import ContainerInfo, ServerDef, Session
 from cooperage.orchestrator.kubernetes import KubernetesOrchestrator
 
@@ -54,7 +56,8 @@ def test_pull_image_spawns_and_deletes_pull_pod(mock_mono, _mock_sleep):
 
 @patch("cooperage.orchestrator.kubernetes.time.sleep")
 @patch("cooperage.orchestrator.kubernetes.time.monotonic", side_effect=[0, 1, 2])
-def test_pull_image_still_cleans_up_on_failed_pod(mock_mono, _mock_sleep):
+def test_pull_image_raises_and_cleans_up_on_failed_pod(mock_mono, _mock_sleep):
+    from cooperage.core.errors import ImagePullError
     client, core_api = _make_mock_k8s_client()
 
     pod_status = MagicMock()
@@ -62,7 +65,8 @@ def test_pull_image_still_cleans_up_on_failed_pod(mock_mono, _mock_sleep):
     core_api.read_namespaced_pod.return_value = pod_status
 
     orch = _make_orch(client)
-    orch.pull_image("cooperage-image-analyzer:latest")  # should not raise
+    with pytest.raises(ImagePullError, match="Failed"):
+        orch.pull_image("cooperage-image-analyzer:latest")
 
     core_api.delete_namespaced_pod.assert_called()
 

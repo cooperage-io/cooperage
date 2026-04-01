@@ -110,7 +110,8 @@ async def test_pull_server_success(mock_get, mock_get_orch):
 @patch("cooperage.gateway.server.registry.get", return_value=None)
 async def test_pull_server_unknown_raises(mock_get):
     from cooperage.gateway.server import pull_server
-    with pytest.raises(ValueError, match="No server named"):
+    from cooperage.core.errors import ServerNotFoundError
+    with pytest.raises(ServerNotFoundError, match="No server named"):
         await pull_server(server_name="ghost")
 
 
@@ -187,7 +188,8 @@ async def test_proxy_list_tools(mock_get_client, mock_ensure):
 @patch("cooperage.gateway.server.registry.get", return_value=None)
 async def test_ensure_container_raises_for_unknown_server(mock_get):
     from cooperage.gateway.server import _ensure_container
-    with pytest.raises(ValueError, match="No server named"):
+    from cooperage.core.errors import ServerNotFoundError
+    with pytest.raises(ServerNotFoundError, match="No server named"):
         await _ensure_container("session1", "ghost")
 
 
@@ -230,8 +232,9 @@ async def test_proxy_call_tool_raises_on_mcp_error(mock_get_client, mock_ensure)
     mock_client.post.return_value = mock_resp
     mock_get_client.return_value = mock_client
 
+    from cooperage.core.errors import ToolExecutionError
     from cooperage.gateway.server import _proxy_call_tool
-    with pytest.raises(RuntimeError, match="tool crashed"):
+    with pytest.raises(ToolExecutionError, match="tool crashed"):
         await _proxy_call_tool("s1", "sim", "run_sim", {})
 
 

@@ -154,12 +154,14 @@ def test_get_or_start_container_raises_if_not_ready(mock_get_orch):
     server = _server_def()
     orch.start_container.return_value = _container_info(session_id=session.id)
 
-    with pytest.raises(RuntimeError, match="failed to start"):
+    from cooperage.core.errors import ContainerStartupError
+    with pytest.raises(ContainerStartupError, match="failed to start"):
         mgr.get_or_start_container(session.id, server)
 
     orch.stop_container.assert_called_once()
 
 
 def test_get_or_start_container_raises_for_unknown_session():
-    with pytest.raises(ValueError, match="not found"):
+    from cooperage.core.errors import SessionNotFoundError
+    with pytest.raises(SessionNotFoundError, match="not found"):
         mgr.get_or_start_container("nosuchid", _server_def())

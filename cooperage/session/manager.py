@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from cooperage.core.config import settings
+from cooperage.core.errors import ContainerStartupError, SessionNotFoundError
 from cooperage.core.models import ContainerInfo, Session, ServerDef
 from cooperage.orchestrator import get_orchestrator
 
@@ -204,7 +205,7 @@ def get_or_start_container(session_id: str, server_def: ServerDef) -> ContainerI
     orch = get_orchestrator()
     session = get_session(session_id)
     if session is None:
-        raise ValueError(f"Session {session_id!r} not found")
+        raise SessionNotFoundError(f"Session {session_id!r} not found")
 
     start_key = f"{session_id}:{server_def.name}"
 
@@ -231,10 +232,10 @@ def get_or_start_container(session_id: str, server_def: ServerDef) -> ContainerI
         if not ready:
             logs = orch.get_container_logs(info.container_id)
             orch.stop_container(info.container_id)
-            raise RuntimeError(
+            raise ContainerStartupError(
                 f"Container for server {server_def.name!r} failed to start "
-                f"within {settings.container_startup_timeout}s.\n"
-                f"Container logs:\n{logs}"
+                f"within {settings.container_startup_timeout}s.",
+                logs=logs,
             )
 
         with _lock:

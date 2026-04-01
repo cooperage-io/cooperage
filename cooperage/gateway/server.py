@@ -24,6 +24,10 @@ import cooperage.session.manager as sessions
 from cooperage.orchestrator import get_orchestrator
 from cooperage.core.auth import AuthContext, authenticate_request, check_server_access, get_oidc_config, load_api_keys
 from cooperage.core.audit import AuditEvent, AuditEventType, emit as audit_emit, measure as audit_measure, elapsed_ms as audit_elapsed_ms
+from cooperage.core.errors import (
+    CooperageError, ContainerConnectionError, QuotaExceededError,
+    ServerNotFoundError, SessionNotFoundError, ToolExecutionError,
+)
 from cooperage.core.models import ContainerInfo, ServerDef
 
 logger = logging.getLogger(__name__)
@@ -211,7 +215,7 @@ def list_sessions_tool(auth: AuthContext, **kwargs) -> list[dict]:
 async def pull_server(server_name: str, **kwargs) -> dict:
     server_def = registry.get(server_name)
     if server_def is None:
-        raise ValueError(f"No server named {server_name!r} in registry")
+        raise ServerNotFoundError(f"No server named {server_name!r} in registry")
     orch = get_orchestrator()
     image_id = await asyncio.to_thread(orch.pull_image, server_def.image)
     return {"server": server_name, "image": server_def.image, "image_id": image_id}
@@ -235,7 +239,7 @@ async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -
     if auth.max_sessions is not None:
         current = sessions.count_sessions_for_tenant(auth.tenant_id)
         if current >= auth.max_sessions:
-            raise PermissionError(
+            raise QuotaExceededError(
                 f"Tenant {auth.tenant_id!r} has reached the session limit ({auth.max_sessions})"
             )
 
@@ -446,11 +450,20 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
         result = await _dispatch(name, arguments)
         text = result if isinstance(result, str) else json.dumps(result, indent=2)
         return [types.TextContent(type="text", text=text)]
+    except CooperageError as e:
+        logger.warning("Tool %s failed: [%s] %s", name, e.code, e)
+        return [types.TextContent(type="text", text=json.dumps(e.to_dict(), indent=2))]
     except PermissionError as e:
-        return [types.TextContent(type="text", text=f"Permission denied: {e}")]
+        return [types.TextContent(type="text", text=json.dumps({
+            "error": True, "code": "permission_denied",
+            "message": str(e), "retriable": False,
+        }, indent=2))]
     except Exception as e:
         logger.exception("Error in tool %s", name)
-        return [types.TextContent(type="text", text=f"Error: {e}")]
+        return [types.TextContent(type="text", text=json.dumps({
+            "error": True, "code": "internal_error",
+            "message": str(e), "retriable": False,
+        }, indent=2))]
 
 
 async def _dispatch(name: str, args: dict[str, Any]) -> Any:
@@ -496,7 +509,7 @@ def _check_session_tenant(session_id: str, auth: AuthContext) -> None:
     """Ensure the session belongs to the authenticated tenant."""
     session = sessions.get_session(session_id)
     if session is None:
-        raise ValueError(f"Session {session_id!r} not found")
+        raise SessionNotFoundError(f"Session {session_id!r} not found")
     if auth.tenant_id != "default" and session.tenant_id != auth.tenant_id:
         raise PermissionError(
             f"Session {session_id[:8]}... belongs to a different tenant"
@@ -582,7 +595,7 @@ async def _warmup_builtin(session_id: str, server_def: ServerDef) -> None:
 async def _ensure_container(session_id: str, server_name: str) -> ContainerInfo:
     server_def = registry.get(server_name)
     if server_def is None:
-        raise ValueError(f"No server named {server_name!r} in registry")
+        raise ServerNotFoundError(f"No server named {server_name!r} in registry")
     session = sessions.get_session(session_id)
     already_running = session is not None and server_name in session.containers
     start = audit_measure()
@@ -625,12 +638,32 @@ async def _proxy_call_tool(
         "params": {"name": tool_name, "arguments": arguments},
     }
     client = await _get_http_client()
-    resp = await client.post(f"{info.mcp_url}/mcp", json=payload, headers=_MCP_HEADERS)
-    resp.raise_for_status()
+    try:
+        resp = await client.post(f"{info.mcp_url}/mcp", json=payload, headers=_MCP_HEADERS)
+        resp.raise_for_status()
+    except httpx.ConnectError:
+        raise ContainerConnectionError(
+            f"Cannot connect to container for '{server_name}' at {info.mcp_url}. "
+            f"The container may have crashed or been stopped."
+        )
+    except httpx.TimeoutException:
+        raise ToolExecutionError(
+            f"Tool '{tool_name}' on server '{server_name}' timed out after 120s.",
+            retriable=True,
+            suggestion="The tool may need more time. Retry or check container logs.",
+        )
+    except httpx.HTTPStatusError as e:
+        raise ToolExecutionError(
+            f"Container for '{server_name}' returned HTTP {e.response.status_code}.",
+            retriable=e.response.status_code >= 500,
+        )
     data = resp.json()
 
     if "error" in data:
-        raise RuntimeError(data["error"].get("message", str(data["error"])))
+        raise ToolExecutionError(
+            data["error"].get("message", str(data["error"])),
+            suggestion=f"Check the arguments for tool '{tool_name}' and try again.",
+        )
 
     result = data.get("result", {})
     content = result.get("content", [])

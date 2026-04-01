@@ -60,7 +60,8 @@ def test_check_session_tenant_wrong_tenant_raises(mock_get):
 @patch("cooperage.gateway.server.sessions.get_session", return_value=None)
 def test_check_session_tenant_missing_session_raises(mock_get):
     from cooperage.gateway.server import _check_session_tenant
-    with pytest.raises(ValueError, match="not found"):
+    from cooperage.core.errors import SessionNotFoundError
+    with pytest.raises(SessionNotFoundError, match="not found"):
         _check_session_tenant("nosuchid", _DEFAULT_AUTH)
 
 
@@ -97,7 +98,8 @@ def test_list_servers_omits_repo_url_when_not_set(mock_load, mock_get_orch):
 async def test_create_session_quota_exceeded_raises(mock_create, mock_count, mock_warmup):
     auth = AuthContext(tenant_id="acme", max_sessions=5)
     from cooperage.gateway.server import create_session
-    with pytest.raises(PermissionError, match="session limit"):
+    from cooperage.core.errors import QuotaExceededError
+    with pytest.raises(QuotaExceededError, match="session limit"):
         await create_session(auth=auth)
     mock_create.assert_not_called()
 
