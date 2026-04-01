@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # Registry
     registry_path: Path = Path.home() / ".cooperage" / "registry.json"
 
-    # Sessions
+    # Session persistence
     sessions_path: Path = Path.home() / ".cooperage" / "sessions.json"
 
     # Gateway
@@ -67,7 +67,6 @@ class Settings(BaseSettings):
 
     # ── Audit logging ──────────────────────────────────────────────────────
     audit_log_path: Path | None = None  # Path to JSON-lines audit log
-
 
 
 settings = Settings()

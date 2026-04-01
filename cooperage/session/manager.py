@@ -209,19 +209,22 @@ def get_or_start_container(session_id: str, server_def: ServerDef) -> ContainerI
 
     start_key = f"{session_id}:{server_def.name}"
 
-    # Fast path: already running
+    # Double-checked locking pattern:
+    #   1. Check under _lock → return immediately if the container exists (fast path).
+    #   2. Grab a per-container start_lock so only one thread starts the container.
+    #   3. Re-check under _lock — another thread may have won the race while we waited.
+    # This avoids holding _lock during the slow Docker/K8s start_container call,
+    # while still preventing two threads from starting the same container.
+
     with _lock:
         existing = _containers[session_id].get(server_def.name)
         if existing is not None:
             return existing
-        # Create a per-container start lock if needed, while holding _lock
         if start_key not in _start_locks:
             _start_locks[start_key] = threading.Lock()
         start_lock = _start_locks[start_key]
 
-    # Serialize concurrent starts of the same container
     with start_lock:
-        # Re-check: a concurrent caller may have started it while we waited
         with _lock:
             existing = _containers[session_id].get(server_def.name)
         if existing is not None:

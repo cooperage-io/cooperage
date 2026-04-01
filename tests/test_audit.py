@@ -134,10 +134,10 @@ def _session_obj(sid="s1"):
 
 
 @pytest.mark.asyncio
-@patch("cooperage.gateway.server.audit_emit")
+@patch("cooperage.core.audit.emit")
 @patch("cooperage.gateway.server.get_orchestrator")
 @patch("cooperage.gateway.server.registry")
-async def test_dispatch_emits_tool_call_audit(mock_registry, mock_orch, mock_audit_emit):
+async def test_dispatch_emits_tool_call_audit(mock_registry, mock_orch, mock_emit):
     mock_registry.load.return_value = []
     mock_orch.return_value = MagicMock(image_exists=MagicMock(return_value=True))
 
@@ -148,8 +148,8 @@ async def test_dispatch_emits_tool_call_audit(mock_registry, mock_orch, mock_aud
     finally:
         _auth_ctx.reset(token)
 
-    mock_audit_emit.assert_called_once()
-    event = mock_audit_emit.call_args[0][0]
+    mock_emit.assert_called_once()
+    event = mock_emit.call_args[0][0]
     assert event.event_type == AuditEventType.TOOL_CALL
     assert event.tool_name == "cooperage_list_servers"
     assert event.tenant_id == "test-tenant"
@@ -158,17 +158,17 @@ async def test_dispatch_emits_tool_call_audit(mock_registry, mock_orch, mock_aud
 
 
 @pytest.mark.asyncio
-@patch("cooperage.gateway.server.audit_emit")
+@patch("cooperage.core.audit.emit")
 @patch("cooperage.gateway.server._warmup_builtin", new_callable=AsyncMock)
 @patch("cooperage.gateway.server.sessions.create_session")
-async def test_create_session_emits_audit(mock_create, mock_warmup, mock_audit_emit):
+async def test_create_session_emits_audit(mock_create, mock_warmup, mock_emit):
     session = _session_obj()
     mock_create.return_value = session
     from cooperage.gateway.server import create_session
     await create_session(auth=AuthContext(tenant_id="acme"))
 
     # Should have at least the session_create event (dispatch also emits tool_call)
-    events = [call[0][0] for call in mock_audit_emit.call_args_list]
+    events = [call[0][0] for call in mock_emit.call_args_list]
     session_events = [e for e in events if e.event_type == AuditEventType.SESSION_CREATE]
     assert len(session_events) == 1
     assert session_events[0].session_id == session.id
@@ -176,8 +176,8 @@ async def test_create_session_emits_audit(mock_create, mock_warmup, mock_audit_e
 
 
 @pytest.mark.asyncio
-@patch("cooperage.gateway.server.audit_emit")
-async def test_dispatch_unknown_tool_raises(mock_audit_emit):
+@patch("cooperage.core.audit.emit")
+async def test_dispatch_unknown_tool_raises(mock_emit):
     """Unknown tools raise before audit — no event emitted."""
     from cooperage.gateway.server import _dispatch, _auth_ctx
     token = _auth_ctx.set(AuthContext(tenant_id="default"))
@@ -186,13 +186,13 @@ async def test_dispatch_unknown_tool_raises(mock_audit_emit):
             await _dispatch("nonexistent_tool", {})
     finally:
         _auth_ctx.reset(token)
-    mock_audit_emit.assert_not_called()
+    mock_emit.assert_not_called()
 
 
 @pytest.mark.asyncio
-@patch("cooperage.gateway.server.audit_emit")
+@patch("cooperage.core.audit.emit")
 @patch("cooperage.gateway.server.sessions.get_session")
-async def test_dispatch_emits_error_on_handler_failure(mock_get_session, mock_audit_emit):
+async def test_dispatch_emits_error_on_handler_failure(mock_get_session, mock_emit):
     """Handler errors are captured in the audit event."""
     mock_get_session.return_value = None
     from cooperage.gateway.server import _dispatch, _auth_ctx
@@ -204,7 +204,7 @@ async def test_dispatch_emits_error_on_handler_failure(mock_get_session, mock_au
     finally:
         _auth_ctx.reset(token)
 
-    mock_audit_emit.assert_called_once()
-    event = mock_audit_emit.call_args[0][0]
+    mock_emit.assert_called_once()
+    event = mock_emit.call_args[0][0]
     assert event.error is not None
     assert "not found" in event.error

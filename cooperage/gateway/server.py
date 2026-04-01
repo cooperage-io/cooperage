@@ -23,7 +23,8 @@ import cooperage.registry.registry as registry
 import cooperage.session.manager as sessions
 from cooperage.orchestrator import get_orchestrator
 from cooperage.core.auth import AuthContext, authenticate_request, check_server_access, get_oidc_config, load_api_keys
-from cooperage.core.audit import AuditEvent, AuditEventType, emit as audit_emit, measure as audit_measure, elapsed_ms as audit_elapsed_ms
+from cooperage.core import audit
+from cooperage.core.audit import AuditEvent, AuditEventType
 from cooperage.core.errors import (
     CooperageError, ContainerConnectionError, QuotaExceededError,
     ServerNotFoundError, SessionNotFoundError, ToolExecutionError,
@@ -53,42 +54,44 @@ async def _get_http_client() -> httpx.AsyncClient:
     return _http_client
 
 
-# Tracks server names that are currently warming up, keyed by session_id.
-_warming: dict[str, set[str]] = {}
-# Tracks warmup tasks so they can be cancelled on session teardown.
-_warmup_tasks: dict[str, list[asyncio.Task]] = {}
+# When a session is created, built-in containers start in the background.
+# _warming tracks which servers haven't finished starting yet (used by
+# list_sessions to show "warming" status). _warmup_tasks holds the asyncio
+# Tasks so they can be cancelled if the session is ended before warmup completes.
+_warming: dict[str, set[str]] = {}       # session_id → {server_name, ...}
+_warmup_tasks: dict[str, list[asyncio.Task]] = {}  # session_id → [Task, ...]
 
 # ── Built-in servers ──────────────────────────────────────────────────────────
 
 _WORKSPACE_SERVER_NAME = "__workspace__"
-_WORKSPACE_IMAGE = "cooperage-workspace:latest"
-_WORKSPACE_SERVER_DEF = ServerDef(
-    name=_WORKSPACE_SERVER_NAME,
-    image=_WORKSPACE_IMAGE,
-    port=8000,
-    description="Built-in workspace server — read/write files in the session volume.",
-)
-
 _COMPUTE_SERVER_NAME = "__compute__"
-_COMPUTE_IMAGE = "cooperage-compute:latest"
-_COMPUTE_SERVER_DEF = ServerDef(
-    name=_COMPUTE_SERVER_NAME,
-    image=_COMPUTE_IMAGE,
-    port=8000,
-    description="Built-in compute server — execute Python scripts with numpy/pandas/scipy/sklearn.",
-)
 
-_BUILTIN_SERVER_NAMES = {_WORKSPACE_SERVER_NAME, _COMPUTE_SERVER_NAME}
+# All built-in servers in one place — add new builtins here.
+# _BUILTIN_SERVER_NAMES and the warmup list are derived from this automatically.
+_BUILTIN_SERVER_DEFS: list[ServerDef] = [
+    ServerDef(
+        name=_WORKSPACE_SERVER_NAME,
+        image="cooperage-workspace:latest",
+        port=8000,
+        description="Built-in workspace server — read/write files in the session volume.",
+    ),
+    ServerDef(
+        name=_COMPUTE_SERVER_NAME,
+        image="cooperage-compute:latest",
+        port=8000,
+        description="Built-in compute server — execute Python scripts with numpy/pandas/scipy/sklearn.",
+    ),
+]
+
+_BUILTIN_SERVER_NAMES = {s.name for s in _BUILTIN_SERVER_DEFS}
 
 
 def _ensure_builtins_registered() -> None:
     """Register built-in servers if not already present."""
-    if registry.get(_WORKSPACE_SERVER_NAME) is None:
-        registry.register(_WORKSPACE_SERVER_DEF)
-        logger.info("Auto-registered built-in workspace server (%s)", _WORKSPACE_IMAGE)
-    if registry.get(_COMPUTE_SERVER_NAME) is None:
-        registry.register(_COMPUTE_SERVER_DEF)
-        logger.info("Auto-registered built-in compute server (%s)", _COMPUTE_IMAGE)
+    for server_def in _BUILTIN_SERVER_DEFS:
+        if registry.get(server_def.name) is None:
+            registry.register(server_def)
+            logger.info("Auto-registered built-in server %s (%s)", server_def.name, server_def.image)
 
 
 # ── Tool registry (decorator-based) ──────────────────────────────────────────
@@ -109,6 +112,10 @@ def tool(
 
     - requires_session: auto-checks session tenant ownership before calling
     - requires_server: auto-checks server RBAC before calling
+
+    Handlers receive **kwargs because _dispatch unpacks the MCP arguments dict
+    directly into the function call. If the LLM sends extra keys we didn't
+    declare, **kwargs absorbs them instead of raising a TypeError.
     """
     def decorator(fn):
         schema = {
@@ -252,9 +259,9 @@ async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -
         metadata={"name": name, "volume": session.volume_name},
     )
 
-    audit_emit(curr_event)
+    audit.emit(curr_event)
 
-    servers_to_warm = [_WORKSPACE_SERVER_DEF, _COMPUTE_SERVER_DEF]
+    servers_to_warm = _BUILTIN_SERVER_DEFS
     _warming[session.id] = {s.name for s in servers_to_warm}
     
     tasks = []
@@ -331,7 +338,7 @@ async def end_session(session_id: str, **kwargs) -> dict:
     _warming.pop(session_id, None)
     auth = _auth_ctx.get()
     ok = sessions.end_session(session_id)
-    audit_emit(AuditEvent(
+    audit.emit(AuditEvent(
         event_type=AuditEventType.SESSION_END,
         session_id=session_id,
         tenant_id=auth.tenant_id,
@@ -477,7 +484,7 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
         raise ValueError(f"Unknown tool: {name!r}")
 
     auth = _auth_ctx.get()
-    start = audit_measure()
+    start = audit.measure()
     error_msg = None
     try:
         # Auto-check session tenant ownership
@@ -498,14 +505,14 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
         error_msg = str(e)
         raise
     finally:
-        audit_emit(AuditEvent(
+        audit.emit(AuditEvent(
             event_type=AuditEventType.TOOL_CALL,
             session_id=args.get("session_id"),
             tenant_id=auth.tenant_id,
             server_name=args.get("server_name"),
             tool_name=name,
             arguments={k: v for k, v in args.items() if k not in ("content", "data")},
-            duration_ms=audit_elapsed_ms(start),
+            duration_ms=audit.elapsed_ms(start),
             error=error_msg,
         ))
 
@@ -603,15 +610,15 @@ async def _ensure_container(session_id: str, server_name: str) -> ContainerInfo:
         raise ServerNotFoundError(f"No server named {server_name!r} in registry")
     session = sessions.get_session(session_id)
     already_running = session is not None and server_name in session.containers
-    start = audit_measure()
+    start = audit.measure()
     info = await asyncio.to_thread(sessions.get_or_start_container, session_id, server_def)
     if not already_running:
-        audit_emit(AuditEvent(
+        audit.emit(AuditEvent(
             event_type=AuditEventType.CONTAINER_START,
             session_id=session_id,
             tenant_id=session.tenant_id if session else "default",
             server_name=server_name,
-            duration_ms=audit_elapsed_ms(start),
+            duration_ms=audit.elapsed_ms(start),
             metadata={"container_id": info.container_id, "image": server_def.image},
         ))
     sessions.touch_container(session_id, server_name)
@@ -827,35 +834,40 @@ async def run_proxy(url: str) -> None:
                 tg.start_soon(remote_to_stdout)
 
 
-async def run_stdio() -> None:
-    """Run the gateway over stdio (for Claude Desktop / MCP CLI).
-    No auth — stdio is always the default tenant."""
+def _init_gateway() -> None:
+    """Shared startup logic for both stdio and SSE entry points."""
     from cooperage.session.manager import start_cleanup_thread
     from cooperage.core.config import settings
-    from cooperage.core import audit
     audit.init(settings.audit_log_path)
     _ensure_builtins_registered()
     start_cleanup_thread()
+
+
+async def _shutdown_http_client() -> None:
+    """Close the shared httpx client if it's open."""
+    if _http_client and not _http_client.is_closed:
+        await _http_client.aclose()
+
+
+async def run_stdio() -> None:
+    """Run the gateway over stdio (for Claude Desktop / MCP CLI).
+    No auth — stdio is always the default tenant."""
+    _init_gateway()
     try:
         async with stdio_server() as (read_stream, write_stream):
             await app.run(read_stream, write_stream, app.create_initialization_options())
     finally:
-        if _http_client and not _http_client.is_closed:
-            await _http_client.aclose()
+        await _shutdown_http_client()
 
 
 async def run_sse(host: str | None = None, port: int | None = None) -> None:
     """Run the gateway as a streamable HTTP server (POST /mcp)."""
-    from cooperage.session.manager import start_cleanup_thread
     from cooperage.core.config import settings
-    from cooperage.core import audit
     import uvicorn
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-    audit.init(settings.audit_log_path)
-    _ensure_builtins_registered()
+    _init_gateway()
     load_api_keys()
-    start_cleanup_thread()
 
     session_manager = StreamableHTTPSessionManager(
         app=app,
@@ -864,50 +876,61 @@ async def run_sse(host: str | None = None, port: int | None = None) -> None:
     )
 
     class GatewayASGIApp:
+        """ASGI app that routes requests to the appropriate handler.
+
+        Routes:
+          /health        → liveness/readiness probe
+          /oidc-config   → OIDC discovery for the UI login flow
+          /logs/...      → container log viewer
+          /upload/...    → binary file upload to workspace
+          /mcp (POST)    → MCP JSON-RPC (authenticated)
+        """
+
         async def __call__(self, scope, receive, send):
             if scope["type"] == "lifespan":
-                async with session_manager.run():
-                    await receive()
-                    await send({"type": "lifespan.startup.complete"})
-                    await receive()
-                    await send({"type": "lifespan.shutdown.complete"})
-                return
+                return await self._handle_lifespan(scope, receive, send)
 
-            if scope["type"] == "http" and scope.get("path", "") == "/health":
-                await _send_json_response(send, 200, {"status": "ok"})
-                return
+            if scope["type"] != "http":
+                return await session_manager.handle_request(scope, receive, send)
 
-            if scope["type"] == "http" and scope.get("path", "") == "/oidc-config":
+            path = scope.get("path", "")
+
+            # Public endpoints (no auth required)
+            if path == "/health":
+                return await _send_json_response(send, 200, {"status": "ok"})
+
+            if path == "/oidc-config":
                 oidc = get_oidc_config()
-                if oidc is None:
-                    await _send_json_response(send, 404, {"error": "OIDC not configured"})
-                else:
-                    await _send_json_response(send, 200, oidc)
-                return
+                status = 200 if oidc else 404
+                body = oidc or {"error": "OIDC not configured"}
+                return await _send_json_response(send, status, body)
 
-            if scope["type"] == "http" and scope.get("path", "").startswith("/logs/"):
-                await _handle_logs(scope, receive, send)
-                return
+            # Endpoints with their own auth handling
+            if path.startswith("/logs/"):
+                return await _handle_logs(scope, receive, send)
 
-            if scope["type"] == "http" and scope.get("path", "").startswith("/upload/"):
-                await _handle_upload(scope, receive, send)
-                return
+            if path.startswith("/upload/"):
+                return await _handle_upload(scope, receive, send)
 
-            # Authenticate MCP requests from HTTP headers
-            if scope["type"] == "http":
-                headers = {k.decode(): v.decode() for k, v in scope.get("headers", [])}
-                try:
-                    auth = authenticate_request(headers)
-                except PermissionError as e:
-                    await _send_json_response(send, 401, {"error": str(e)})
-                    return
-                token = _auth_ctx.set(auth)
-                try:
-                    await session_manager.handle_request(scope, receive, send)
-                finally:
-                    _auth_ctx.reset(token)
-            else:
+            # MCP endpoint — authenticate from HTTP headers
+            headers = {k.decode(): v.decode() for k, v in scope.get("headers", [])}
+            try:
+                auth = authenticate_request(headers)
+            except PermissionError as e:
+                return await _send_json_response(send, 401, {"error": str(e)})
+
+            token = _auth_ctx.set(auth)
+            try:
                 await session_manager.handle_request(scope, receive, send)
+            finally:
+                _auth_ctx.reset(token)
+
+        async def _handle_lifespan(self, scope, receive, send):
+            async with session_manager.run():
+                await receive()
+                await send({"type": "lifespan.startup.complete"})
+                await receive()
+                await send({"type": "lifespan.shutdown.complete"})
 
     config = uvicorn.Config(
         GatewayASGIApp(),
@@ -919,5 +942,4 @@ async def run_sse(host: str | None = None, port: int | None = None) -> None:
     try:
         await server.serve()
     finally:
-        if _http_client and not _http_client.is_closed:
-            await _http_client.aclose()
+        await _shutdown_http_client()
