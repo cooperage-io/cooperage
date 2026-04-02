@@ -437,6 +437,63 @@ def _render_preview(session_id: str, selected_file: str) -> None:
 
 # ── Main content (fragment refreshes without full-page flash) ─────────────────
 
+def _render_servers_sidebar() -> None:
+    """Render registered-servers sidebar (must run outside fragment)."""
+    error = _check_gateway(GATEWAY_URL, _get_token())
+    if error is not None:
+        return
+
+    try:
+        all_sessions = list_sessions()
+    except Exception:
+        return
+
+    try:
+        servers = list_servers()
+    except Exception:
+        servers = []
+
+    if not servers:
+        return
+
+    # Determine running servers from the selected session (if any)
+    running_servers: set[str] = set()
+    session_id = st.session_state.get("_session_id")
+    if all_sessions and session_id:
+        session = next((s for s in all_sessions if s["session_id"] == session_id), None)
+        if session:
+            running_servers = {c["server_name"] for c in session.get("containers", [])}
+
+    with st.sidebar.expander("📦 Registered Servers", expanded=True):
+        for srv in servers:
+            name = srv["name"]
+            cached = "✅" if srv.get("cached") else "⬇️"
+            is_running = name in running_servers
+
+            col_name, col_btn = st.columns([3, 1])
+            with col_name:
+                if is_running:
+                    st.markdown(f"🟢 **{name}**")
+                else:
+                    st.markdown(f"{cached} **{name}**")
+                if srv.get("description"):
+                    st.caption(srv["description"])
+            with col_btn:
+                if is_running:
+                    st.caption("Running")
+                elif st.button("Start", key=f"start_srv__{name}", use_container_width=True):
+                    if session_id:
+                        with st.spinner(f"Starting {name}..."):
+                            try:
+                                call_tool("cooperage_list_tools", {
+                                    "session_id": session_id,
+                                    "server_name": name,
+                                })
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to start {name}: {e}")
+
+
 @st.fragment(run_every=AUTO_REFRESH)
 def main_content() -> None:
     # Check gateway connectivity first
@@ -451,21 +508,8 @@ def main_content() -> None:
         st.error(f"Failed to list sessions: {e}")
         return
 
-    # ── Registered servers (sidebar) ─────────────────────────────────────────
-    try:
-        servers = list_servers()
-    except Exception:
-        servers = []
-
     if not all_sessions:
         st.info("No active sessions. Create one in Claude Desktop with `cooperage_create_session`.")
-        if servers:
-            with st.sidebar.expander("📦 Registered Servers", expanded=True):
-                for srv in servers:
-                    cached = "✅" if srv.get("cached") else "⬇️"
-                    st.markdown(f"{cached} **{srv['name']}**")
-                    if srv.get("description"):
-                        st.caption(srv["description"])
         return
 
     session_names = {
@@ -475,37 +519,6 @@ def main_content() -> None:
     selected_label = st.selectbox("Session", list(session_names.keys()))
     session_id = session_names[selected_label]
     session = next(s for s in all_sessions if s["session_id"] == session_id)
-
-    # ── Servers sidebar with Start buttons ────────────────────────────────────
-    if servers:
-        running_servers = {c["server_name"] for c in session.get("containers", [])}
-        with st.sidebar.expander("📦 Registered Servers", expanded=True):
-            for srv in servers:
-                name = srv["name"]
-                cached = "✅" if srv.get("cached") else "⬇️"
-                is_running = name in running_servers
-
-                col_name, col_btn = st.columns([3, 1])
-                with col_name:
-                    if is_running:
-                        st.markdown(f"🟢 **{name}**")
-                    else:
-                        st.markdown(f"{cached} **{name}**")
-                    if srv.get("description"):
-                        st.caption(srv["description"])
-                with col_btn:
-                    if is_running:
-                        st.caption("Running")
-                    elif st.button("Start", key=f"start_srv__{name}", use_container_width=True):
-                        with st.spinner(f"Starting {name}..."):
-                            try:
-                                call_tool("cooperage_list_tools", {
-                                    "session_id": session_id,
-                                    "server_name": name,
-                                })
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Failed to start {name}: {e}")
 
     # Clear selections when switching sessions
     if st.session_state.get("_session_id") != session_id:
@@ -632,6 +645,9 @@ if _logo_path:
 else:
     st.title("Cooperage")
 _render_auth_sidebar()
+
+# Sidebar servers (outside fragment to avoid widget-in-external-container error)
+_render_servers_sidebar()
 
 # Main content
 main_content()
