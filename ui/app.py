@@ -544,11 +544,12 @@ def main_content() -> None:
                 st.warning(f"⏳ **{name}** warming...")
             elif cid:
                 icon = "🟢" if c["builtin"] else "🔵"
+                alert = st.success if c["builtin"] else st.info
+                alert(f"{icon} **{name}** `{cid[:12]}`")
                 if st.button(
-                    f"{icon} {name}  `{cid[:12]}`",
+                    "Hide logs" if is_selected else "View logs",
                     key=f"ctr__{cid}",
                     use_container_width=True,
-                    type="primary" if is_selected else "secondary",
                 ):
                     if is_selected:
                         st.session_state["_selected_container"] = None

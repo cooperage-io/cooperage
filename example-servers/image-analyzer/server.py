@@ -49,7 +49,11 @@ def analyze_scenes(image_paths: list[str]) -> str:
                 "std": round(float(pixels.std()), 2),
             },
         }
-    return json.dumps(results, indent=2)
+    output_dir = WORKSPACE / "analysis"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "batch_analysis.json"
+    output_path.write_text(json.dumps(results, indent=2))
+    return json.dumps({"results": results, "saved_to": f"analysis/batch_analysis.json"}, indent=2)
 
 
 @mcp.tool()
@@ -76,6 +80,12 @@ def analyze_scene(image_path: str = "scene.png") -> str:
             "std": round(float(pixels.std()), 2),
         },
     }
+    output_dir = WORKSPACE / "analysis"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(image_path).stem
+    output_path = output_dir / f"{stem}_analysis.json"
+    output_path.write_text(json.dumps(result, indent=2))
+    result["saved_to"] = f"analysis/{stem}_analysis.json"
     return json.dumps(result, indent=2)
 
 
