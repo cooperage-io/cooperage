@@ -24,9 +24,16 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+_favicon = next((
+    p for p in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "favicon.png"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "favicon.png"),
+    ] if os.path.exists(p)
+), None)
+
 st.set_page_config(
     page_title="Cooperage",
-    page_icon="🛢️",
+    page_icon=_favicon,
     layout="wide",
 )
 
