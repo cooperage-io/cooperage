@@ -641,7 +641,14 @@ _logo_path = next((
 ), None)
 del _here
 if _logo_path:
-    st.image(_logo_path, width=320)
+    import base64 as _b64
+    with open(_logo_path, "rb") as _f:
+        _logo_b64 = _b64.b64encode(_f.read()).decode()
+    st.markdown(
+        f'<img src="data:image/png;base64,{_logo_b64}" style="width:320px;height:auto;">',
+        unsafe_allow_html=True,
+    )
+    del _logo_b64
 else:
     st.title("Cooperage")
 _render_auth_sidebar()
