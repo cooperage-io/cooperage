@@ -545,26 +545,24 @@ def main_content() -> None:
             elif cid:
                 icon = "🟢" if c["builtin"] else "🔵"
                 alert = st.success if c["builtin"] else st.info
-                alert(f"{icon} **{name}** `{cid[:12]}`")
-                if st.button(
-                    "Hide logs" if is_selected else "View logs",
-                    key=f"ctr__{cid}",
-                    use_container_width=True,
-                ):
+                label = f"{icon} **{name}**"
+                if is_selected:
+                    label += "  ◂"
+                alert(label)
+                if st.button("Logs", key=f"ctr__{cid}", use_container_width=True):
                     if is_selected:
                         st.session_state["_selected_container"] = None
                     else:
                         st.session_state["_selected_container"] = cid
                         st.session_state["_selected_container_name"] = name
         st.caption("🟢 Built-in  🔵 Add-on  ⏳ Warming")
-        st.caption("Click a container to view its logs.")
 
         # ── Log viewer ────────────────────────────────────────────────────────
         selected_cid = st.session_state.get("_selected_container")
         if selected_cid:
             cname = st.session_state.get("_selected_container_name", selected_cid[:12])
             st.divider()
-            st.markdown(f"**Terminal — {cname}**")
+            st.markdown(f"**Terminal — {cname}** `{selected_cid[:12]}`")
             tail = st.select_slider(
                 "Lines", options=[50, 100, 200, 500], value=100,
                 key="log_tail",
