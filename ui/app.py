@@ -534,7 +534,7 @@ def main_content() -> None:
         st.subheader("Containers")
         containers = session.get("containers", [])
         st.markdown(
-            "<style>div[data-testid='stButton'] button { text-align: left; justify-content: flex-start; }</style>",
+            "<style>div[data-testid='stButton'] button p { text-align: left; width: 100%; }</style>",
             unsafe_allow_html=True,
         )
         if not containers:
@@ -559,7 +559,10 @@ def main_content() -> None:
                     else:
                         st.session_state["_selected_container"] = cid
                         st.session_state["_selected_container_name"] = name
-        st.caption("🟢 Built-in\n🔵 Add-on\n⏳ Warming")
+        st.markdown(
+            "<small style='color:grey;'>🟢 Built-in<br>🔵 Add-on<br>⏳ Warming</small>",
+            unsafe_allow_html=True,
+        )
 
         # ── Log viewer ────────────────────────────────────────────────────────
         selected_cid = st.session_state.get("_selected_container")
