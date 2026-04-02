@@ -555,7 +555,7 @@ def main_content() -> None:
                     else:
                         st.session_state["_selected_container"] = cid
                         st.session_state["_selected_container_name"] = name
-        st.caption("🟢 Built-in  🔵 Add-on  ⏳ Warming")
+        st.caption("🟢 Built-in\n\n🔵 Add-on\n\n⏳ Warming")
 
         # ── Log viewer ────────────────────────────────────────────────────────
         selected_cid = st.session_state.get("_selected_container")
