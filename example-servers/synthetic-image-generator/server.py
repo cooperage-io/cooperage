@@ -185,10 +185,9 @@ def generate_scene(
     seed: int | None = None,
     output_path: str = "scene.png",
 ) -> str:
-    """Generate synthetic satellite imagery and save it to /workspace.
-    Returns image stats and file paths.
-    Use output_path to save to a specific location (e.g. 'scenes/terrain.png')
-    so multiple scenes can coexist without overwriting each other.
+    """Generate a single synthetic satellite image and save it to /workspace.
+    If you need all three scene types, call generate_all_scenes instead — it's one call.
+    Always set output_path explicitly (e.g. 'scenes/terrain.png') so files don't overwrite each other.
     Other Cooperage servers in the same session can read the output from /workspace."""
     meta = _generate_scene(scene_type, width, height, seed, output_path)
     return json.dumps(meta, indent=2)
