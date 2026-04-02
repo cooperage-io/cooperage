@@ -31,6 +31,12 @@ jobs:
           - image: cooperage-ui
             context: .
             dockerfile: Dockerfile.ui
+          - image: cooperage-synthetic-image-generator
+            context: ./example-servers/synthetic-image-generator
+            dockerfile: ./example-servers/synthetic-image-generator/Dockerfile
+          - image: cooperage-image-analyzer
+            context: ./example-servers/image-analyzer
+            dockerfile: ./example-servers/image-analyzer/Dockerfile
 
     steps:
       - uses: actions/checkout@v4
