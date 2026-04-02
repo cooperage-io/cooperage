@@ -535,8 +535,6 @@ def main_content() -> None:
         containers = session.get("containers", [])
         if not containers:
             st.caption("No containers running yet.")
-        btn_styles = []  # (1-based index, builtin, selected)
-        btn_idx = 0
         for c in containers:
             cid = c.get("container_id")
             name = c["server_name"]
@@ -545,7 +543,6 @@ def main_content() -> None:
             if c.get("status") == "warming":
                 st.warning(f"⏳ **{name}** warming...")
             elif cid:
-                btn_idx += 1
                 icon = "🟢" if c["builtin"] else "🔵"
                 if st.button(
                     f"{icon} {name}",
@@ -558,20 +555,6 @@ def main_content() -> None:
                     else:
                         st.session_state["_selected_container"] = cid
                         st.session_state["_selected_container_name"] = name
-                if not is_selected:
-                    btn_styles.append((btn_idx, c["builtin"]))
-        # Color non-selected buttons green (built-in) or blue (add-on)
-        if btn_styles:
-            rules = []
-            for idx, builtin in btn_styles:
-                bg = "#d4edda" if builtin else "#d1ecf1"
-                border = "#28a745" if builtin else "#17a2b8"
-                rules.append(
-                    f'div[data-testid="stColumn"]:first-child '
-                    f'div[data-testid="stButton"]:nth-of-type({idx}) button '
-                    f'{{ background-color: {bg} !important; border-color: {border} !important; color: #333 !important; }}'
-                )
-            st.markdown(f"<style>{''.join(rules)}</style>", unsafe_allow_html=True)
         st.caption("🟢 Built-in  🔵 Add-on  ⏳ Warming")
 
         # ── Log viewer ────────────────────────────────────────────────────────
