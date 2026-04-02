@@ -53,7 +53,7 @@ def analyze_scenes(image_paths: list[str]) -> str:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "batch_analysis.json"
     output_path.write_text(json.dumps(results, indent=2))
-    return json.dumps({"results": results, "saved_to": f"analysis/batch_analysis.json"}, indent=2)
+    return json.dumps({"results": results, "saved_to": "analysis/batch_analysis.json"}, indent=2)
 
 
 @mcp.tool()
