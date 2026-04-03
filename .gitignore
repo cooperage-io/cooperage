@@ -15,3 +15,4 @@ htmlcov/
 *.log
 .claude/settings.local.json
 donot-commit/
+.vscode/
