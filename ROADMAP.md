@@ -59,7 +59,8 @@
 ## Backlog
 
 - **Fly.io / Railway backend** — simpler cloud alternative to K8s or bare Docker VM
-- **Resource usage telemetry** — CPU/memory per container, exposed as a gateway tool or resource
+- **Dynamic resource sizing** — today resource limits are static (global defaults or per-server overrides at registration). Add support for: resource usage telemetry (CPU/memory per container, exposed as a gateway tool or resource), right-sizing recommendations based on historical usage, and optional Kubernetes VPA (Vertical Pod Autoscaler) integration for containers that consistently over- or under-request.
+- **Workspace storage limits** — workspace volume is currently unbounded (hostPath on K8s, Docker volume locally). Add configurable per-session storage quotas and surface usage in the UI and `cooperage_list_sessions` output.
 - **`cooperage deploy` CLI** — thin wrapper to provision cloud infra (droplet or K8s) and deploy the stack
 - **K8s: RWX PVC workspace** — optional alternative to hostPath + pod affinity for clusters with RWX StorageClass
 - **K8s: Ingress support** — replace NodePort with Ingress/ClusterIP for production on-prem routing
