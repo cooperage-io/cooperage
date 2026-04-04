@@ -516,9 +516,23 @@ def main_content() -> None:
         f"{s.get('name') or 'unnamed'} ({s['session_id'][:8]}...)": s["session_id"]
         for s in all_sessions
     }
-    selected_label = st.selectbox("Session", list(session_names.keys()))
+    sel_col, end_col = st.columns([4, 1])
+    with sel_col:
+        selected_label = st.selectbox("Session", list(session_names.keys()))
     session_id = session_names[selected_label]
     session = next(s for s in all_sessions if s["session_id"] == session_id)
+    with end_col:
+        st.markdown("<div style='height: 1.65rem'></div>", unsafe_allow_html=True)
+        if st.button("🛑 End Session", use_container_width=True, type="secondary"):
+            try:
+                call_tool("cooperage_end_session", {"session_id": session_id})
+                st.session_state["_session_id"] = None
+                st.session_state["selected_file"] = None
+                st.session_state["_selected_container"] = None
+                st.session_state["_selected_container_name"] = None
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to end session: {e}")
 
     # Clear selections when switching sessions
     if st.session_state.get("_session_id") != session_id:
