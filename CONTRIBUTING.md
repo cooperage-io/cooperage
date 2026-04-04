@@ -61,6 +61,33 @@ tests/
 3. Build: `docker build -t my-server:latest example-servers/<name>`
 4. Register: `cooperage register --name <name> --image my-server:latest`
 
+## Versioning
+
+Cooperage follows [Semantic Versioning](https://semver.org/). The version appears in two places that must stay in sync:
+
+- `pyproject.toml` → `project.version`
+- `chart/Chart.yaml` → `version` and `appVersion`
+
+### Cutting a release
+
+1. Update the version in both files:
+   ```bash
+   # Example: bumping from 0.1.0 to 0.2.0
+   # pyproject.toml:  version = "0.2.0"
+   # chart/Chart.yaml: version: 0.2.0 / appVersion: "0.2.0"
+   ```
+2. Commit the bump:
+   ```bash
+   git commit -am "Bump version to 0.2.0"
+   ```
+3. Tag on main:
+   ```bash
+   git tag v0.2.0
+   git push origin main --tags
+   ```
+
+Tags trigger CI to publish versioned images to `ghcr.io/cooperage-io/` (e.g. `cooperage:0.2.0` alongside `cooperage:latest`).
+
 ## Submitting changes
 
 - Keep PRs focused — one thing at a time
