@@ -70,19 +70,13 @@ Cooperage follows [Semantic Versioning](https://semver.org/). The version appear
 
 ### Cutting a release
 
-1. Update the version in both files:
+1. Run the bump script from main:
    ```bash
-   # Example: bumping from 0.1.0 to 0.2.0
-   # pyproject.toml:  version = "0.2.0"
-   # chart/Chart.yaml: version: 0.2.0 / appVersion: "0.2.0"
+   ./scripts/bump-version.sh 0.2.0
    ```
-2. Commit the bump:
+   This updates both files, commits, and tags in one step.
+2. Push:
    ```bash
-   git commit -am "Bump version to 0.2.0"
-   ```
-3. Tag on main:
-   ```bash
-   git tag v0.2.0
    git push origin main --tags
    ```
 
