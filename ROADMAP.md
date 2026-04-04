@@ -44,7 +44,15 @@
 
 ## Up Next
 
-(Prioritizing based on demo feedback and enterprise readiness)
+- **GPU support for K8s workloads** — allow MCP tool servers to request GPU resources on enterprise Kubernetes clusters.
+  - Extend `ResourceLimits` model with `gpu: int | None` and `gpu_type: str | None` (default `nvidia.com/gpu`) fields.
+  - Wire GPU limits into the Pod spec in `KubernetesOrchestrator.start_container` as extended resource requests/limits (e.g. `nvidia.com/gpu: "1"`).
+  - Add configurable `tolerations` and `nodeSelector` to `ServerDef` so pods land on tainted GPU nodes.
+  - Add `default_gpu_tolerations` to `Settings` / Helm `values.yaml` for cluster-wide defaults.
+  - GPU-enabled tool server images use `nvidia/cuda` base images with CUDA libraries pre-installed; Cooperage handles scheduling.
+  - Docker orchestrator: pass `--gpus` flag via `device_requests` in the Docker SDK for local dev parity.
+  - Example server: `gpu-compute` — CUDA-aware compute server with PyTorch/JAX pre-installed, registered with `"resources": {"gpu": 1}`.
+  - Enterprise considerations: quota enforcement per tenant (max GPUs), audit log entries for GPU allocation, idle timeout tuning for expensive GPU pods.
 
 ---
 
