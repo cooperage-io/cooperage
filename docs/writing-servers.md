@@ -370,11 +370,6 @@ Both approaches work the same way from the LLM's perspective — it sees a list 
 
 Before registering your server:
 
-- [ ] Server uses `FastMCP` with `json_response=True, stateless_http=True`
-- [ ] Server listens on port 8000 (or configurable via `PORT` env var)
-- [ ] All shared data goes through `/workspace`
-- [ ] Tool docstrings clearly describe inputs, outputs, and workspace side effects
+- [ ] Tools have clear docstrings describing inputs, outputs, and what they write to `/workspace`
+- [ ] All shared data goes through `/workspace` (use `workspace.path()` or raw `/workspace`)
 - [ ] Dockerfile builds and runs: `docker build -t name . && docker run -p 8000:8000 name`
-- [ ] `tools/list` endpoint responds: `curl http://localhost:8000/mcp`
-- [ ] No hardcoded paths outside `/workspace`
-- [ ] No server-side session state (stateless mode)
