@@ -298,6 +298,45 @@ docker build -t my-server:latest .
 docker run -p 8000:8000 -v /tmp/test-workspace:/workspace my-server:latest
 ```
 
+## Adding documentation
+
+Add a `docs/` directory to your project and call `register_docs(mcp)`. Each
+file becomes an MCP Resource the LLM can discover and read on demand.
+
+```
+my-server/
+  server.py
+  Dockerfile
+  docs/
+    quickstart.md
+    api-reference.md
+    scene-types.md
+```
+
+```python
+from cooperage_sdk import workspace, serve, register_docs
+
+mcp = FastMCP("my-server", json_response=True, stateless_http=True)
+
+# ... your tools ...
+
+register_docs(mcp)  # registers all files in docs/ as MCP Resources
+serve(mcp)
+```
+
+The LLM can then:
+1. `cooperage_list_server_resources("session", "my-server")` — see what docs are available, with descriptions
+2. `cooperage_read_server_resource("session", "my-server", "docs://scene-types.md")` — read the ones it needs
+
+This is especially useful for domain-specific tools where the LLM needs context
+it doesn't natively have (spectral analysis, orbital mechanics, signal processing, etc.).
+
+Tips for writing good docs:
+- Start each file with a descriptive first line — this becomes the resource description the LLM sees when deciding what to read
+- One topic per file (the LLM reads selectively, not all at once)
+- Include example inputs/outputs
+- Explain domain concepts the LLM won't know
+
 ## Examples
 
 | Server | What it does | Source |

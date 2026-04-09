@@ -299,6 +299,60 @@ async def proxy_list_tools(session_id: str, server_name: str, **kwargs) -> list[
 
 
 @tool(
+    "cooperage_list_server_resources",
+    description=(
+        "List MCP resources (documentation, reference data, etc.) exposed by a server. "
+        "Resources have a name, URI, and description — read the description to decide "
+        "which resources are relevant before reading them."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "server_name": {"type": "string"},
+    },
+    required=["session_id", "server_name"],
+    requires_session=True,
+    requires_server=True,
+)
+async def proxy_list_resources(session_id: str, server_name: str, **kwargs) -> list[dict]:
+    info = await _ensure_container(session_id, server_name)
+    payload = {"jsonrpc": "2.0", "id": next(_rpc_id_counter), "method": "resources/list", "params": {}}
+    client = await _get_http_client()
+    resp = await client.post(f"{info.mcp_url}/mcp", json=payload, headers=_MCP_HEADERS, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("result", {}).get("resources", [])
+
+
+@tool(
+    "cooperage_read_server_resource",
+    description=(
+        "Read a specific MCP resource from a server by URI. "
+        "Use cooperage_list_server_resources first to discover available resources "
+        "and their descriptions."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "server_name": {"type": "string"},
+        "uri": {"type": "string", "description": "The resource URI (e.g. docs://quickstart)"},
+    },
+    required=["session_id", "server_name", "uri"],
+    requires_session=True,
+    requires_server=True,
+)
+async def proxy_read_resource(session_id: str, server_name: str, uri: str, **kwargs) -> str:
+    info = await _ensure_container(session_id, server_name)
+    payload = {"jsonrpc": "2.0", "id": next(_rpc_id_counter), "method": "resources/read", "params": {"uri": uri}}
+    client = await _get_http_client()
+    resp = await client.post(f"{info.mcp_url}/mcp", json=payload, headers=_MCP_HEADERS, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    contents = data.get("result", {}).get("contents", [])
+    if contents:
+        return contents[0].get("text", "")
+    return ""
+
+
+@tool(
     "cooperage_call_tool",
     description=(
         "Call a tool on a registered MCP server within a session. "
