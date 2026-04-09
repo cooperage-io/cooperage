@@ -74,3 +74,4 @@
 - **Multi-agent demo** — orchestrator agent creates a session and passes `session_id` to parallel subagents, each calling a different server. Validates concurrent tool calls. Target framework: Claude Agent SDK.
 - **`cooperage.io` domain + public landing page** — set up domain, simple landing page with live demo link and install instructions.
 - **Audit log rotation** — cap audit log file size and keep N compressed backups (Python `RotatingFileHandler` or logrotate config). Currently grows unbounded.
+- **Interactive terminal in UI** — web-based terminal (xterm.js) in the Streamlit dashboard that connects to a session's compute container. Enables users to run bash interactively without CLI access to the host. Requires a websocket endpoint on the gateway. `cooperage exec` CLI command as a simpler alternative for local Docker deployments.
