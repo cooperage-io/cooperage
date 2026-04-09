@@ -1,4 +1,4 @@
-"""Tests for the audit logging module."""
+"""Tests for the audit module — event schema and integration with gateway dispatch."""
 import json
 import time
 from datetime import datetime, timedelta, timezone
@@ -11,7 +11,6 @@ from cooperage.core.audit import (
     AuditEventType,
     elapsed_ms,
     emit,
-    init,
     measure,
 )
 from cooperage.core.auth import AuthContext
@@ -36,57 +35,9 @@ def test_measure_and_elapsed():
     assert ms >= 5  # at least ~10ms but allow for scheduling jitter
 
 
-def test_emit_writes_jsonl(tmp_path):
-    log_path = tmp_path / "audit.jsonl"
-    init(log_path)
-    event = AuditEvent(
-        event_type=AuditEventType.TOOL_CALL,
-        session_id="s1",
-        tenant_id="acme",
-        tool_name="cooperage_list_servers",
-        duration_ms=42.5,
-    )
-    emit(event)
-    lines = log_path.read_text().strip().split("\n")
-    assert len(lines) == 1
-    parsed = json.loads(lines[0])
-    assert parsed["event_type"] == "tool_call"
-    assert parsed["session_id"] == "s1"
-    assert parsed["tenant_id"] == "acme"
-    assert parsed["tool_name"] == "cooperage_list_servers"
-    assert parsed["duration_ms"] == 42.5
-
-
-def test_emit_appends_multiple(tmp_path):
-    log_path = tmp_path / "audit.jsonl"
-    init(log_path)
-    for i in range(3):
-        emit(AuditEvent(
-            event_type=AuditEventType.TOOL_CALL,
-            tool_name=f"tool_{i}",
-        ))
-    lines = log_path.read_text().strip().split("\n")
-    assert len(lines) == 3
-
-
-def test_emit_noop_when_not_initialized():
-    """emit() should silently no-op when init() was never called."""
-    import cooperage.core.audit as audit_mod
-    original = audit_mod._log_path
-    audit_mod._log_path = None
-    try:
-        emit(AuditEvent(event_type=AuditEventType.TOOL_CALL))
-    finally:
-        audit_mod._log_path = original
-
-
-def test_emit_creates_parent_dirs(tmp_path):
-    log_path = tmp_path / "subdir" / "nested" / "audit.jsonl"
-    init(log_path)
-    emit(AuditEvent(event_type=AuditEventType.SESSION_CREATE, session_id="s1"))
-    assert log_path.exists()
-    parsed = json.loads(log_path.read_text().strip())
-    assert parsed["event_type"] == "session_create"
+def test_emit_noop_by_default():
+    """emit() should silently no-op when no enterprise sink is registered."""
+    emit(AuditEvent(event_type=AuditEventType.TOOL_CALL))  # should not raise
 
 
 def test_all_event_types_serialize():

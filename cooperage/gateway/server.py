@@ -22,11 +22,11 @@ from mcp import types
 import cooperage.registry.registry as registry
 import cooperage.session.manager as sessions
 from cooperage.orchestrator import get_orchestrator
-from cooperage.core.auth import AuthContext, authenticate_request, check_server_access, get_oidc_config, load_api_keys
+from cooperage.core.auth import AuthContext, authenticate_request, check_server_access, get_oidc_config, get_auth_provider
 from cooperage.core import audit
 from cooperage.core.audit import AuditEvent, AuditEventType
 from cooperage.core.errors import (
-    CooperageError, ContainerConnectionError, QuotaExceededError,
+    CooperageError, ContainerConnectionError,
     ServerNotFoundError, SessionNotFoundError, ToolExecutionError,
 )
 from cooperage.core.models import ContainerInfo, ServerDef
@@ -158,6 +158,7 @@ def list_servers(auth: AuthContext, **kwargs) -> list[dict]:
     for s in registry.load():
         if s.name in _BUILTIN_SERVER_NAMES:
             continue
+        # Enterprise auth providers may filter by auth.allowed_servers
         if auth.allowed_servers is not None and s.name not in auth.allowed_servers:
             continue
         entry = {
@@ -243,13 +244,6 @@ async def pull_server(server_name: str, **kwargs) -> dict:
 )
 async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -> dict:
     from cooperage.core.config import settings as _settings
-    if auth.max_sessions is not None:
-        current = sessions.count_sessions_for_tenant(auth.tenant_id)
-        if current >= auth.max_sessions:
-            raise QuotaExceededError(
-                f"Tenant {auth.tenant_id!r} has reached the session limit ({auth.max_sessions})"
-            )
-
     session = sessions.create_session(name=name, tenant_id=auth.tenant_id)
     
     curr_event = AuditEvent(
@@ -694,6 +688,7 @@ async def _handle_logs(scope, receive, send) -> None:
     """Handle GET /logs/{session_id}/{container_id}?tail=100"""
     from urllib.parse import parse_qs
 
+    # Auth check (no-op in open core, enterprise provider validates)
     try:
         headers = {k.decode(): v.decode() for k, v in scope.get("headers", [])}
         auth = authenticate_request(headers)
@@ -711,11 +706,12 @@ async def _handle_logs(scope, receive, send) -> None:
     session_id = parts[1]
     container_id = parts[2]
 
-    # Verify session exists and belongs to this tenant
+    # Verify session exists
     session = sessions.get_session(session_id)
     if session is None:
         await _send_json_response(send, 404, {"error": f"Session {session_id} not found"})
         return
+    # Enterprise auth: tenant isolation check
     if auth.tenant_id != "default" and session.tenant_id != auth.tenant_id:
         await _send_json_response(send, 403, {"error": "Access denied"})
         return
@@ -837,8 +833,7 @@ async def run_proxy(url: str) -> None:
 def _init_gateway() -> None:
     """Shared startup logic for both stdio and SSE entry points."""
     from cooperage.session.manager import start_cleanup_thread
-    from cooperage.core.config import settings
-    audit.init(settings.audit_log_path)
+    audit.init()
     _ensure_builtins_registered()
     start_cleanup_thread()
 
@@ -867,7 +862,7 @@ async def run_sse(host: str | None = None, port: int | None = None) -> None:
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
     _init_gateway()
-    load_api_keys()
+    get_auth_provider().on_startup()
 
     session_manager = StreamableHTTPSessionManager(
         app=app,

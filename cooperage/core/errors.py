@@ -80,7 +80,3 @@ class ContainerConnectionError(CooperageError):
     suggestion = "The container may still be starting. Retry in a few seconds."
 
 
-class QuotaExceededError(CooperageError):
-    code = "quota_exceeded"
-    retriable = False
-    suggestion = "End an existing session with cooperage_end_session before creating a new one."

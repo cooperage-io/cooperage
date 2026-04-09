@@ -14,11 +14,13 @@
 - [x] Resource limits — CPU/memory configurable at registration and via config
 - [x] `repo_url` on `ServerDef` — LLM can inspect server source when debugging
 
-### Auth
-- [x] API key auth (`COOPERAGE_AUTH_ENABLED`, `Authorization: Bearer`)
+### Auth (extracted to [cooperage-enterprise](https://github.com/cooperage-io/cooperage-enterprise))
+- [x] API key auth
 - [x] HS256 JWT auth
 - [x] OIDC / RS256 JWT auth (Azure AD, Okta, Auth0)
 - [x] Per-tenant session isolation and RBAC (`allowed_servers`, `max_sessions`)
+- [x] Audit logging (JSON-lines event log)
+- [x] Plugin interface — open core ships with `AuthProvider` and `AuditSink` protocols
 
 ### Deployment
 - [x] DigitalOcean droplet — gateway + UI running in production at `137.184.119.104`
@@ -38,7 +40,6 @@
 - [x] Persistent gateway state — PVC for sessions.json + registry.json
 - [x] Image registry prefix — `COOPERAGE_IMAGE_REGISTRY_PREFIX` for air-gapped clusters
 - [x] CI — GitHub Actions for tests + image publishing
-- [x] Audit logging — JSON-lines event log for tool calls, sessions, and container lifecycle (`COOPERAGE_AUDIT_LOG_PATH`)
 
 ---
 

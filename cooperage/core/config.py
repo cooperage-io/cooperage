@@ -43,18 +43,6 @@ class Settings(BaseSettings):
     # ── Image registry prefix (air-gapped / internal mirror) ────────────────
     image_registry_prefix: str = ""  # e.g. "registry.corp.internal/"
 
-    # ── Authentication ───────────────────────────────────────────────────────
-    auth_enabled: bool = False  # Set True for enterprise deployments
-    api_keys_path: Path | None = None  # Path to API keys JSON file
-    jwt_secret: str | None = None  # HS256 secret for JWT validation
-
-    # ── OIDC / SSO ────────────────────────────────────────────────────────────
-    oidc_issuer_url: str | None = None  # e.g. https://login.microsoftonline.com/{tenant}/v2.0
-    oidc_audience: str | None = None  # Expected "aud" claim (your app's client ID)
-    oidc_tenant_claim: str = "tid"  # JWT claim to use as tenant_id
-    oidc_client_id: str | None = None  # OAuth2 client ID (for UI login flow)
-    oidc_scopes: str = "openid profile email"  # Space-separated scopes
-
     # ── Resource limits (defaults for all containers) ────────────────────────
     default_cpu_limit: str = "1.0"  # Docker: CPU quota; K8s: resource limit
     default_memory_limit: str = "512m"  # e.g. "512m", "1g", "2g"
@@ -65,8 +53,6 @@ class Settings(BaseSettings):
     # ── Image registry auth ──────────────────────────────────────────────────
     registry_auth_path: Path | None = None  # Path to registry credentials JSON
 
-    # ── Audit logging ──────────────────────────────────────────────────────
-    audit_log_path: Path | None = None  # Path to JSON-lines audit log
 
 
 settings = Settings()

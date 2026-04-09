@@ -69,18 +69,8 @@ persistence:
 # -- Network isolation (NetworkPolicy per session)
 networkIsolation: true
 
-# -- Authentication
-auth:
-  enabled: false
-  # -- HS256 JWT secret (set via --set or external secret)
-  jwtSecret: ""
-  # -- OIDC settings
-  oidc:
-    issuerUrl: ""
-    audience: ""
-    tenantClaim: tid
-    clientId: ""
-    scopes: "openid profile email"
+# -- Authentication (provided by cooperage-enterprise package)
+# See: https://github.com/cooperage-io/cooperage-enterprise
 
 # -- UI sidecar (Streamlit workspace viewer)
 ui:

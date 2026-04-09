@@ -4,20 +4,15 @@ Cooperage Workspace UI
 Live viewer for active sessions, running containers, and /workspace file contents.
 Run via: cooperage ui
 
-Supports three auth modes:
-  - No auth (local dev) — just works
-  - API key / JWT — paste in the sidebar
-  - SSO (OIDC) — redirects to your identity provider automatically
+Authentication is provided by the cooperage-enterprise package.
+In open-source mode, no auth is needed.
 """
 
 import base64
-import hashlib
 import io
 import json
 import os
-import secrets
 import tarfile
-from urllib.parse import urlencode
 
 import httpx
 import pandas as pd
@@ -45,147 +40,18 @@ GATEWAY_URL = st.sidebar.text_input("Gateway URL", value="http://localhost:8080/
 AUTO_REFRESH = st.sidebar.slider("Auto-refresh (seconds)", 1, 30, 1)
 
 
-# ── OIDC state helpers ────────────────────────────────────────────────────────
-
-@st.cache_data(ttl=60)
-def _fetch_oidc_config(_base_url: str) -> dict | None:
-    """Fetch OIDC config from the gateway. Cached for 60s since this rarely changes.
-    _base_url is a cache key so it reruns if the gateway URL changes."""
-    try:
-        resp = httpx.get(f"{_base_url}/oidc-config", timeout=5)
-        if resp.status_code == 200:
-            return resp.json()
-    except Exception:
-        pass
-    return None
-
-
-def _handle_oidc_callback() -> None:
-    """Check for an OAuth2 authorization code in query params and exchange it for a token."""
-    params = st.query_params
-    code = params.get("code")
-    if not code:
-        return
-
-    # Verify state to prevent CSRF
-    returned_state = params.get("state", "")
-    expected_state = st.session_state.get("_oidc_state", "")
-    if returned_state != expected_state:
-        st.error("SSO login failed: state mismatch. Please try again.")
-        st.query_params.clear()
-        return
-
-    oidc = st.session_state.get("_oidc_config")
-    if not oidc:
-        st.query_params.clear()
-        return
-
-    # Exchange authorization code for tokens
-    issuer = oidc["issuer_url"].rstrip("/")
-    token_url = f"{issuer}/token"
-
-    try:
-        resp = httpx.post(token_url, data={
-            "grant_type": "authorization_code",
-            "client_id": oidc["client_id"],
-            "code": code,
-            "redirect_uri": _get_redirect_uri(),
-            "code_verifier": st.session_state.get("_oidc_verifier", ""),
-        }, timeout=10)
-        resp.raise_for_status()
-        tokens = resp.json()
-
-        # Store the access token (prefer id_token for OIDC, fall back to access_token)
-        token = tokens.get("id_token") or tokens.get("access_token")
-        if token:
-            st.session_state["_oidc_token"] = token
-        # Clear PKCE state after successful exchange
-        st.session_state.pop("_oidc_state", None)
-        st.session_state.pop("_oidc_verifier", None)
-        st.session_state.pop("_oidc_challenge", None)
-    except Exception as e:
-        st.error(f"SSO token exchange failed: {e}")
-
-    st.query_params.clear()
-
-
-def _get_redirect_uri() -> str:
-    """Build the OAuth2 redirect URI pointing back to this Streamlit app.
-    Uses the browser's current URL so it works in both local and deployed environments."""
-    try:
-        ctx = st.context
-        headers = ctx.headers
-        # Respect X-Forwarded headers from reverse proxies
-        proto = headers.get("X-Forwarded-Proto", "http")
-        host = headers.get("Host", "localhost:8501")
-        return f"{proto}://{host}"
-    except Exception:
-        return "http://localhost:8501"
-
-
-def _generate_pkce() -> tuple[str, str]:
-    """Generate a PKCE code_verifier and code_challenge pair."""
-    verifier = secrets.token_urlsafe(64)
-    challenge = base64.urlsafe_b64encode(
-        hashlib.sha256(verifier.encode()).digest()
-    ).rstrip(b"=").decode()
-    return verifier, challenge
-
-
-def _start_oidc_login(oidc: dict) -> str:
-    """Build the OIDC authorization URL and store state for later verification.
-    Reuses existing PKCE state if already generated (avoids invalidating
-    the state on every Streamlit rerun before the user clicks the button)."""
-    if "_oidc_state" not in st.session_state:
-        st.session_state["_oidc_state"] = secrets.token_urlsafe(32)
-        verifier, challenge = _generate_pkce()
-        st.session_state["_oidc_verifier"] = verifier
-        st.session_state["_oidc_challenge"] = challenge
-
-    st.session_state["_oidc_config"] = oidc
-
-    params = {
-        "response_type": "code",
-        "client_id": oidc["client_id"],
-        "redirect_uri": _get_redirect_uri(),
-        "scope": oidc["scopes"],
-        "state": st.session_state["_oidc_state"],
-        "code_challenge": st.session_state["_oidc_challenge"],
-        "code_challenge_method": "S256",
-    }
-    return f"{oidc['authorization_endpoint']}?{urlencode(params)}"
-
-
 # ── Auth sidebar ──────────────────────────────────────────────────────────────
 
 def _render_auth_sidebar() -> None:
-    """Render the authentication section in the sidebar."""
-    oidc = _fetch_oidc_config(_gateway_base())
-
+    """Render optional auth token input for enterprise deployments."""
     with st.sidebar.expander("🔑 Authentication", expanded=not _get_token()):
-        if oidc:
-            # SSO is available
-            if st.session_state.get("_oidc_token"):
-                st.success("Signed in via SSO")
-                if st.button("Sign out", use_container_width=True):
-                    for key in ("_oidc_token", "_oidc_state", "_oidc_verifier", "_oidc_challenge", "_oidc_config"):
-                        st.session_state.pop(key, None)
-                    st.rerun()
-            else:
-                login_url = _start_oidc_login(oidc)
-                st.link_button("🔒 Sign in with SSO", login_url, use_container_width=True)
-                st.divider()
-                st.caption("Or paste a token manually:")
-                st.text_input("API key or JWT", type="password", key="auth_token")
-        else:
-            # No SSO — manual token only
-            st.caption("Leave blank for local mode. Required when the gateway has auth enabled.")
-            st.text_input("API key or JWT", type="password", key="auth_token")
+        st.caption("Leave blank for local mode. Required when the gateway has enterprise auth enabled.")
+        st.text_input("API key or JWT", type="password", key="auth_token")
 
 
 def _get_token() -> str:
-    """Return the current auth token — from SSO or manual entry."""
-    return st.session_state.get("_oidc_token") or st.session_state.get("auth_token", "")
+    """Return the current auth token from manual entry."""
+    return st.session_state.get("auth_token", "")
 
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
@@ -648,10 +514,6 @@ def main_content() -> None:
 
 # ── App entry ─────────────────────────────────────────────────────────────────
 
-# Handle OIDC callback (if returning from SSO redirect)
-_handle_oidc_callback()
-
-# Render auth sidebar
 _here = os.path.dirname(os.path.abspath(__file__))
 _logo_path = next((
     p for p in [

@@ -28,18 +28,6 @@ data:
   {{- if .Values.imageRegistryPrefix }}
   COOPERAGE_IMAGE_REGISTRY_PREFIX: {{ .Values.imageRegistryPrefix | quote }}
   {{- end }}
-  COOPERAGE_AUTH_ENABLED: {{ .Values.auth.enabled | quote }}
-  {{- if .Values.auth.oidc.issuerUrl }}
-  COOPERAGE_OIDC_ISSUER_URL: {{ .Values.auth.oidc.issuerUrl | quote }}
-  {{- end }}
-  {{- if .Values.auth.oidc.audience }}
-  COOPERAGE_OIDC_AUDIENCE: {{ .Values.auth.oidc.audience | quote }}
-  {{- end }}
-  COOPERAGE_OIDC_TENANT_CLAIM: {{ .Values.auth.oidc.tenantClaim | quote }}
-  {{- if .Values.auth.oidc.clientId }}
-  COOPERAGE_OIDC_CLIENT_ID: {{ .Values.auth.oidc.clientId | quote }}
-  {{- end }}
-  COOPERAGE_OIDC_SCOPES: {{ .Values.auth.oidc.scopes | quote }}
   {{- if .Values.ui.enabled }}
   COOPERAGE_UI_URL: "http://cooperage-ui.{{ .Release.Namespace }}.svc:{{ .Values.ui.port }}"
   {{- end }}

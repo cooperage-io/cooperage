@@ -32,14 +32,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: cooperage-gateway
-          {{- if .Values.auth.jwtSecret }}
-          env:
-            - name: COOPERAGE_JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: cooperage-gateway-secrets
-                  key: jwt-secret
-          {{- end }}
           {{- if .Values.persistence.enabled }}
           volumeMounts:
             - name: data

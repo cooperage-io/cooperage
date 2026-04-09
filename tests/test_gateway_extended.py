@@ -1,6 +1,5 @@
 """
-Extended gateway tests — covers MCP resources, _check_session_tenant,
-create_session quota enforcement, ui_url, and repo_url in list_servers.
+Extended gateway tests — covers MCP resources, ui_url, and repo_url in list_servers.
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -12,7 +11,6 @@ from cooperage.core.auth import AuthContext
 from cooperage.core.models import ServerDef, Session
 
 _DEFAULT_AUTH = AuthContext(tenant_id="default")
-_TENANT_AUTH = AuthContext(tenant_id="acme")
 
 
 def _session(tenant_id="default", name=None) -> Session:
@@ -31,38 +29,6 @@ def _set_auth(auth: AuthContext):
 def _reset_auth(token):
     from cooperage.gateway.server import _auth_ctx
     _auth_ctx.reset(token)
-
-
-# ── _check_session_tenant ─────────────────────────────────────────────────────
-
-@patch("cooperage.gateway.server.sessions.get_session")
-def test_check_session_tenant_default_auth_allows_any(mock_get):
-    mock_get.return_value = _session(tenant_id="acme")
-    from cooperage.gateway.server import _check_session_tenant
-    _check_session_tenant("s1", _DEFAULT_AUTH)  # should not raise
-
-
-@patch("cooperage.gateway.server.sessions.get_session")
-def test_check_session_tenant_matching_tenant_allowed(mock_get):
-    mock_get.return_value = _session(tenant_id="acme")
-    from cooperage.gateway.server import _check_session_tenant
-    _check_session_tenant("s1", _TENANT_AUTH)  # should not raise
-
-
-@patch("cooperage.gateway.server.sessions.get_session")
-def test_check_session_tenant_wrong_tenant_raises(mock_get):
-    mock_get.return_value = _session(tenant_id="other")
-    from cooperage.gateway.server import _check_session_tenant
-    with pytest.raises(PermissionError, match="different tenant"):
-        _check_session_tenant("s1", _TENANT_AUTH)
-
-
-@patch("cooperage.gateway.server.sessions.get_session", return_value=None)
-def test_check_session_tenant_missing_session_raises(mock_get):
-    from cooperage.gateway.server import _check_session_tenant
-    from cooperage.core.errors import SessionNotFoundError
-    with pytest.raises(SessionNotFoundError, match="not found"):
-        _check_session_tenant("nosuchid", _DEFAULT_AUTH)
 
 
 # ── list_servers with repo_url ────────────────────────────────────────────────
@@ -89,34 +55,6 @@ def test_list_servers_omits_repo_url_when_not_set(mock_load, mock_get_orch):
     assert "repo_url" not in result[0]
 
 
-# ── create_session quota enforcement ─────────────────────────────────────────
-
-@pytest.mark.asyncio
-@patch("cooperage.gateway.server._warmup_builtin", new_callable=AsyncMock)
-@patch("cooperage.gateway.server.sessions.count_sessions_for_tenant", return_value=5)
-@patch("cooperage.gateway.server.sessions.create_session")
-async def test_create_session_quota_exceeded_raises(mock_create, mock_count, mock_warmup):
-    auth = AuthContext(tenant_id="acme", max_sessions=5)
-    from cooperage.gateway.server import create_session
-    from cooperage.core.errors import QuotaExceededError
-    with pytest.raises(QuotaExceededError, match="session limit"):
-        await create_session(auth=auth)
-    mock_create.assert_not_called()
-
-
-@pytest.mark.asyncio
-@patch("cooperage.gateway.server._warmup_builtin", new_callable=AsyncMock)
-@patch("cooperage.gateway.server.sessions.count_sessions_for_tenant", return_value=4)
-@patch("cooperage.gateway.server.sessions.create_session")
-async def test_create_session_under_quota_succeeds(mock_create, mock_count, mock_warmup):
-    session = _session(tenant_id="acme")
-    mock_create.return_value = session
-    auth = AuthContext(tenant_id="acme", max_sessions=5)
-    from cooperage.gateway.server import create_session
-    result = await create_session(auth=auth)
-    assert session.id in result
-
-
 # ── create_session ui_url ─────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -125,11 +63,6 @@ async def test_create_session_under_quota_succeeds(mock_create, mock_count, mock
 async def test_create_session_includes_ui_url(mock_create, mock_warmup, monkeypatch):
     session = _session()
     mock_create.return_value = session
-    monkeypatch.setattr("cooperage.gateway.server._settings", MagicMock(
-        ui_url="http://localhost:8501",
-        max_sessions=None,
-    ), raising=False)
-    # Patch the settings inside create_session directly
     import cooperage.core.config as cfg_mod
     monkeypatch.setattr(cfg_mod, "settings", MagicMock(
         ui_url="http://localhost:8501",
@@ -247,17 +180,7 @@ async def test_handle_read_resource_unknown_raises():
         _reset_auth(token)
 
 
-# ── list_sessions_tool RBAC ───────────────────────────────────────────────────
-
-@patch("cooperage.gateway.server.sessions.list_sessions")
-def test_list_sessions_tool_filters_by_tenant(mock_list):
-    s = _session(tenant_id="acme")
-    mock_list.return_value = [s]
-    from cooperage.gateway.server import list_sessions_tool
-    auth = AuthContext(tenant_id="acme")
-    list_sessions_tool(auth=auth)
-    mock_list.assert_called_once_with(tenant_id="acme")
-
+# ── list_sessions_tool ───────────────────────────────────────────────────────
 
 @patch("cooperage.gateway.server.sessions.list_sessions")
 def test_list_sessions_tool_default_tenant_shows_all(mock_list):

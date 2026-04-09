@@ -151,23 +151,16 @@ Cooperage ships with a Streamlit-based dashboard for monitoring sessions, viewin
 uv run cooperage ui
 ```
 
-Supports file preview (images, HTML, CSV, PDF) and file upload. When SSO is configured, the UI shows a login button automatically.
+Supports file preview (images, HTML, CSV, PDF) and file upload.
 
-## Multi-tenant / enterprise mode
+## Enterprise
 
-By default Cooperage runs in local mode — no auth, no quotas, everything works for a single user. For shared deployments, set `COOPERAGE_AUTH_ENABLED=true`.
+For multi-tenant deployments with authentication (API keys, JWT, OIDC/SSO), per-tenant RBAC, session quotas, and audit logging, see [cooperage-enterprise](https://github.com/cooperage-io/cooperage-enterprise).
 
-**Authentication** (checked in order):
-
-1. **API keys** — static keys mapped to tenants, with per-tenant RBAC and session quotas.
-2. **HS256 JWT** — signed tokens with a `tenant_id` claim.
-3. **OIDC / SSO** — RS256 tokens validated via JWKS from your identity provider (Okta, Azure AD, Auth0, etc.). The UI supports PKCE-based login — no client secret needed.
-
-**Other enterprise features:**
+**Other features included in the open-source core:**
 - Per-container CPU and memory limits (default: 1 CPU, 512 MB)
 - Per-session network isolation (Docker bridge networks / K8s NetworkPolicy)
 - Private image registry authentication
-- Session quotas per tenant
 - Container idle timeout with automatic cleanup
 - Session TTL extension on activity
 
@@ -184,14 +177,7 @@ All settings use the `COOPERAGE_` prefix and can go in a `.env` file. See [`.env
 | `COOPERAGE_DEFAULT_CPU_LIMIT` | `1.0` | CPU limit per container |
 | `COOPERAGE_DEFAULT_MEMORY_LIMIT` | `512m` | Memory limit per container |
 | `COOPERAGE_NETWORK_ISOLATION` | `true` | Per-session network isolation |
-| `COOPERAGE_AUTH_ENABLED` | `false` | Enable authentication |
-| `COOPERAGE_API_KEYS_PATH` | — | Path to API keys JSON |
-| `COOPERAGE_JWT_SECRET` | — | HS256 secret |
-| `COOPERAGE_OIDC_ISSUER_URL` | — | OIDC issuer (e.g. Azure AD) |
-| `COOPERAGE_OIDC_AUDIENCE` | — | Expected `aud` claim |
-| `COOPERAGE_OIDC_CLIENT_ID` | — | OAuth2 client ID (enables SSO in UI) |
 | `COOPERAGE_UI_URL` | — | UI base URL (shown to users after session creation) |
-| `COOPERAGE_AUDIT_LOG_PATH` | — | Path to JSON-lines audit log (tool calls, sessions, containers) |
 | `COOPERAGE_K8S_NAMESPACE` | `cooperage` | Kubernetes namespace |
 
 ## CLI

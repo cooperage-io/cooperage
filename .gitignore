@@ -13,6 +13,8 @@ build/
 .coverage
 htmlcov/
 *.log
+git_logs.txt
 .claude/settings.local.json
 donot-commit/
+cooperage-enterprise/
 .vscode/
