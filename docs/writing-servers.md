@@ -300,8 +300,11 @@ docker run -p 8000:8000 -v /tmp/test-workspace:/workspace my-server:latest
 
 ## Adding documentation
 
-Add a `docs/` directory to your project and call `register_docs(mcp)`. Each
-file becomes an MCP Resource the LLM can discover and read on demand.
+Your server probably has domain knowledge the LLM doesn't have — calibration procedures, file format specs, workflow guides, etc. You can expose documentation so the LLM reads it on demand, instead of dumping everything into the tool description.
+
+### Quick way: docs directory
+
+Add a `docs/` folder to your project and call `register_docs(mcp)`. Each file becomes readable by the LLM, with the first line of each file shown as a preview.
 
 ```
 my-server/
@@ -309,8 +312,8 @@ my-server/
   Dockerfile
   docs/
     quickstart.md
-    api-reference.md
-    scene-types.md
+    sensor-calibration.md
+    output-format.md
 ```
 
 ```python
@@ -320,21 +323,40 @@ mcp = FastMCP("my-server", json_response=True, stateless_http=True)
 
 # ... your tools ...
 
-register_docs(mcp)  # registers all files in docs/ as MCP Resources
+register_docs(mcp)
 serve(mcp)
 ```
 
-The LLM can then:
-1. `cooperage_list_server_resources("session", "my-server")` — see what docs are available, with descriptions
-2. `cooperage_read_server_resource("session", "my-server", "docs://scene-types.md")` — read the ones it needs
+Make sure the `docs/` folder is copied in your Dockerfile:
 
-This is especially useful for domain-specific tools where the LLM needs context
-it doesn't natively have (spectral analysis, orbital mechanics, signal processing, etc.).
+```dockerfile
+COPY docs/ docs/
+```
 
-Tips for writing good docs:
-- Start each file with a descriptive first line — this becomes the resource description the LLM sees when deciding what to read
-- One topic per file (the LLM reads selectively, not all at once)
-- Include example inputs/outputs
+### Manual way: MCP resources
+
+If you want more control — custom descriptions, dynamic content, or non-file resources — register them directly:
+
+```python
+@mcp.resource("docs://calibration",
+              name="Calibration Guide",
+              description="How to calibrate the sensor array for different orbital altitudes")
+def calibration_docs():
+    return Path("docs/calibration.md").read_text()
+
+@mcp.resource("docs://supported-formats",
+              name="Supported Formats",
+              description="Input/output file formats: HDF5, NetCDF, GeoTIFF, CSV")
+def format_docs():
+    return Path("docs/formats.md").read_text()
+```
+
+Both approaches work the same way from the LLM's perspective — it sees a list of available docs with descriptions and reads the ones it needs.
+
+### Tips for writing good docs
+- **Start each file with a descriptive first line** — this is shown as a preview so the LLM can decide whether to read the full doc
+- **One topic per file** — the LLM reads selectively, not all at once
+- Include example inputs and outputs
 - Explain domain concepts the LLM won't know
 
 ## Examples
