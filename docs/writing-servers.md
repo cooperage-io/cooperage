@@ -338,15 +338,15 @@ COPY docs/ docs/
 If you want more control — custom descriptions, dynamic content, or non-file resources — register them directly:
 
 ```python
-@mcp.resource("docs://calibration",
-              name="Calibration Guide",
-              description="How to calibrate the sensor array for different orbital altitudes")
-def calibration_docs():
-    return Path("docs/calibration.md").read_text()
+@mcp.resource("docs://pipeline-config",
+              name="Pipeline Configuration",
+              description="How to configure multi-step processing pipelines and set parameters")
+def pipeline_docs():
+    return Path("docs/pipeline-config.md").read_text()
 
 @mcp.resource("docs://supported-formats",
               name="Supported Formats",
-              description="Input/output file formats: HDF5, NetCDF, GeoTIFF, CSV")
+              description="Input/output file formats and their expected schemas")
 def format_docs():
     return Path("docs/formats.md").read_text()
 ```
