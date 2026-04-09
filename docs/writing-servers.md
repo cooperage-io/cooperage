@@ -73,41 +73,15 @@ cooperage-sdk
 
 This pulls in `mcp` and `uvicorn` — nothing else. Add whatever your server needs (numpy, pandas, Pillow, etc.).
 
-### 4. Build and register
+### 4. Hand off to your admin
+
+Once your server is built and tested, give your admin the Docker image. They'll register it with Cooperage and make it available to users:
 
 ```bash
-# Build the image
 docker build -t my-server:latest .
-
-# Register with Cooperage
-cooperage register \
-  --name my-server \
-  --image my-server:latest \
-  --description "Processes data files"
-
-# Optional: link to your source repo so the LLM can inspect/debug
-cooperage register \
-  --name my-server \
-  --image my-server:latest \
-  --description "Processes data files" \
-  --repo-url https://github.com/my-org/my-server
 ```
 
-### 5. Use it
-
-Once registered, the LLM can use your server through the Cooperage gateway:
-
-```
-LLM: cooperage_create_session()
-     → session_id: "abc123"
-
-LLM: cooperage_call_tool("abc123", "my-server", "process_data",
-       {"input_file": "raw.txt", "output_file": "processed.txt"})
-     → "Processed raw.txt → processed.txt"
-
-LLM: cooperage_workspace_read("abc123", "processed.txt")
-     → (file contents)
-```
+See the main [README](../README.md) for registration and deployment details.
 
 ## Requirements
 
