@@ -116,10 +116,12 @@ Two containers. One session. One shared volume. Your proprietary tools stay in y
 Package any MCP server as a Docker image:
 
 1. Expose MCP on port `8000` (configurable at registration)
-2. Use `StreamableHTTPSessionManager` with `json_response=True, stateless=True`
+2. Use `FastMCP` with `json_response=True, stateless_http=True`
 3. Read/write `/workspace` for cross-container data sharing
 
-See [example-servers/image-analyzer/](example-servers/image-analyzer/) for a working example.
+See the full guide: **[Writing Servers for Cooperage](docs/writing-servers.md)**
+
+For working examples, see [example-servers/image-analyzer/](example-servers/image-analyzer/) and [example-servers/synthetic-image-generator/](example-servers/synthetic-image-generator/).
 
 ```bash
 uv run cooperage register \
