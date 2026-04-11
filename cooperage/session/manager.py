@@ -156,8 +156,9 @@ def list_sessions(tenant_id: str | None = None) -> list[Session]:
 
 
 def count_sessions_for_tenant(tenant_id: str) -> int:
-    """Count active sessions for a given tenant (for quota enforcement)."""
-    return len(list_sessions(tenant_id=tenant_id))
+    """Count non-expired sessions for a given tenant (for quota enforcement)."""
+    now = datetime.now(timezone.utc)
+    return len([s for s in list_sessions(tenant_id=tenant_id) if s.expires_at > now])
 
 
 def end_session(session_id: str) -> bool:

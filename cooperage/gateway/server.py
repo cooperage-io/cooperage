@@ -249,7 +249,8 @@ async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -
         current = sessions.count_sessions_for_tenant(auth.tenant_id)
         if current >= auth.max_sessions:
             raise PermissionError(
-                f"Tenant {auth.tenant_id!r} has reached the session limit ({auth.max_sessions})"
+                f"Tenant {auth.tenant_id!r} has {current} active sessions "
+                f"(limit: {auth.max_sessions}). End existing sessions to free capacity."
             )
 
     session = sessions.create_session(name=name, tenant_id=auth.tenant_id)
