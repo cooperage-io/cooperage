@@ -246,3 +246,54 @@ def test_reap_returns_empty_when_nothing_expired(mock_get_orch):
 
     reaped = mgr.reap_expired_sessions()
     assert reaped == []
+
+
+# ── set_session_expiry ───────────────────────────────────────────────────────
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+def test_set_expiry_extends_session(mock_get_orch):
+    """Setting expiry to a future time works."""
+    from datetime import datetime, timedelta, timezone
+
+    mock_get_orch.return_value = _mock_orch()
+    session = mgr.create_session()
+    new_expiry = datetime.now(timezone.utc) + timedelta(hours=12)
+    actual = mgr.set_session_expiry(session.id, new_expiry)
+    assert abs((actual - new_expiry).total_seconds()) < 1
+    assert abs((mgr.get_session(session.id).expires_at - new_expiry).total_seconds()) < 1
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+def test_set_expiry_capped_at_72_hours(mock_get_orch):
+    """Expiry beyond 72h from creation is capped."""
+    from datetime import datetime, timedelta, timezone
+
+    mock_get_orch.return_value = _mock_orch()
+    session = mgr.create_session()
+    max_expiry = session.created_at + timedelta(hours=72)
+    way_past = datetime.now(timezone.utc) + timedelta(hours=100)
+    actual = mgr.set_session_expiry(session.id, way_past)
+    assert abs((actual - max_expiry).total_seconds()) < 1
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+def test_set_expiry_rejects_past_time(mock_get_orch):
+    """Cannot set expiry to the past."""
+    from datetime import datetime, timedelta, timezone
+
+    mock_get_orch.return_value = _mock_orch()
+    session = mgr.create_session()
+    past = datetime.now(timezone.utc) - timedelta(hours=1)
+    with pytest.raises(ValueError, match="future"):
+        mgr.set_session_expiry(session.id, past)
+
+
+def test_set_expiry_unknown_session():
+    """Setting expiry on nonexistent session raises."""
+    from datetime import datetime, timedelta, timezone
+    from cooperage.core.errors import SessionNotFoundError
+
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    with pytest.raises(SessionNotFoundError):
+        mgr.set_session_expiry("nosuchid", future)

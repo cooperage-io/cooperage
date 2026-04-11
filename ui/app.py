@@ -13,6 +13,7 @@ import io
 import json
 import os
 import tarfile
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pandas as pd
@@ -410,6 +411,64 @@ def main_content() -> None:
         st.session_state["selected_file"] = None
         st.session_state["_selected_container"] = None
         st.session_state["_selected_container_name"] = None
+
+    # ── Session expiry control ───────────────────────────────────────────────
+    now = datetime.now(timezone.utc)
+    expires_at = datetime.fromisoformat(session.get("expires_at", now.isoformat()))
+    created_at = datetime.fromisoformat(session.get("created_at", now.isoformat()))
+    max_expiry = created_at + timedelta(hours=72)
+    remaining = expires_at - now
+
+    if remaining.total_seconds() > 0:
+        hours, rem = divmod(int(remaining.total_seconds()), 3600)
+        mins = rem // 60
+        remaining_str = f"{hours}h {mins}m remaining"
+    else:
+        remaining_str = "expired"
+
+    expiry_options = {
+        "1 hour from now": timedelta(hours=1),
+        "4 hours from now": timedelta(hours=4),
+        "12 hours from now": timedelta(hours=12),
+        "24 hours from now": timedelta(hours=24),
+        "72 hours from now": timedelta(hours=72),
+    }
+    # Filter out options that exceed the 72h cap
+    available_options = {}
+    for label, delta in expiry_options.items():
+        target = now + delta
+        if target <= max_expiry:
+            available_options[label] = delta
+        else:
+            # Show capped version if there's meaningful time left
+            capped_remaining = max_expiry - now
+            if capped_remaining.total_seconds() > 3600:
+                capped_h = int(capped_remaining.total_seconds() // 3600)
+                available_options[f"{capped_h}h from now (max)"] = capped_remaining
+            break
+
+    exp_col, exp_btn_col = st.columns([3, 1])
+    with exp_col:
+        st.caption(f"Expires: {remaining_str}")
+        if available_options:
+            selected_expiry = st.selectbox(
+                "Set expiry to",
+                list(available_options.keys()),
+                key=f"expiry__{session_id}",
+                label_visibility="collapsed",
+            )
+    with exp_btn_col:
+        st.caption("")
+        if available_options and st.button("Set", key=f"set_expiry__{session_id}", use_container_width=True):
+            new_expiry = now + available_options[selected_expiry]
+            try:
+                call_tool("cooperage_set_session_expiry", {
+                    "session_id": session_id,
+                    "expires_at": new_expiry.isoformat(),
+                })
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to set expiry: {e}")
 
     col_containers, col_files, col_preview = st.columns([1, 1, 2])
 

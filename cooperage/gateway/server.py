@@ -203,6 +203,7 @@ def list_sessions_tool(auth: AuthContext, **kwargs) -> list[dict]:
             "session_id": s.id,
             "name": s.name,
             "tenant_id": s.tenant_id,
+            "created_at": s.created_at.isoformat(),
             "expires_at": s.expires_at.isoformat(),
             "containers": containers,
         })
@@ -401,6 +402,28 @@ async def end_session(session_id: str, **kwargs) -> dict:
         tenant_id=auth.tenant_id,
     ))
     return {"ended": ok, "session_id": session_id}
+
+
+@tool(
+    "cooperage_set_session_expiry",
+    description=(
+        "Set when a session expires. The expiry is capped at 72 hours from "
+        "the session's creation time. Pass an ISO 8601 timestamp."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "expires_at": {"type": "string", "description": "ISO 8601 timestamp for the new expiry"},
+    },
+    required=["session_id", "expires_at"],
+    requires_session=True,
+)
+async def set_session_expiry(session_id: str, expires_at: str, **kwargs) -> dict:
+    from datetime import datetime, timezone
+    new_expiry = datetime.fromisoformat(expires_at)
+    if new_expiry.tzinfo is None:
+        new_expiry = new_expiry.replace(tzinfo=timezone.utc)
+    actual = sessions.set_session_expiry(session_id, new_expiry)
+    return {"session_id": session_id, "expires_at": actual.isoformat()}
 
 
 @tool(

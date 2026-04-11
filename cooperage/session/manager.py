@@ -268,6 +268,26 @@ def touch_container(session_id: str, server_name: str) -> None:
             info.last_activity = now
 
 
+MAX_SESSION_LIFETIME_SECONDS = 72 * 3600  # 72 hours from creation
+
+
+def set_session_expiry(session_id: str, expires_at: datetime) -> datetime:
+    """Set session expiry to a specific time. Capped at 72h from creation.
+    Returns the actual expiry that was set."""
+    with _lock:
+        session = _sessions.get(session_id)
+        if session is None:
+            raise SessionNotFoundError(session_id)
+        max_expiry = session.created_at + timedelta(seconds=MAX_SESSION_LIFETIME_SECONDS)
+        if expires_at > max_expiry:
+            expires_at = max_expiry
+        if expires_at <= datetime.now(timezone.utc):
+            raise ValueError("Expiry must be in the future")
+        session.expires_at = expires_at
+        _save()
+    return expires_at
+
+
 def touch_session(session_id: str) -> None:
     """Extend session TTL on activity (if enabled)."""
     if not settings.session_extend_on_activity:
