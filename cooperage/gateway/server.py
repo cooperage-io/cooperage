@@ -526,6 +526,30 @@ async def run_script(session_id: str, script: str, **kwargs):
     return await _proxy_call_tool(session_id, _COMPUTE_SERVER_NAME, "run_script", {"script": script})
 
 
+@tool(
+    "cooperage_get_container_logs",
+    description=(
+        "Get the stdout/stderr logs from a container in the session. "
+        "Useful for checking progress of long-running tools, debugging errors, "
+        "or monitoring server output. Returns the last N lines (default 100)."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "server_name": {"type": "string"},
+        "tail": {"type": "integer", "description": "Number of lines from the end (default 100)"},
+    },
+    required=["session_id", "server_name"],
+    requires_session=True,
+)
+async def get_container_logs(session_id: str, server_name: str, tail: int = 100, **kwargs) -> dict:
+    container = sessions.get_container(session_id, server_name)
+    if container is None:
+        return {"error": True, "message": f"No running container for {server_name!r}"}
+    orch = get_orchestrator()
+    logs = await asyncio.to_thread(orch.get_container_logs, container.container_id, tail)
+    return {"server_name": server_name, "tail": tail, "logs": logs}
+
+
 # ── MCP handlers (wired to the decorator registry) ───────────────────────────
 
 @app.list_tools()

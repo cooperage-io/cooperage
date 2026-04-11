@@ -315,6 +315,49 @@ async def test_dispatch_workspace_list(mock_op, mock_check):
     mock_op.assert_called_once_with("s1", "workspace_list", {})
 
 
+# ── cooperage_get_container_logs ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@patch("cooperage.gateway.server._check_session_tenant")
+@patch("cooperage.gateway.server.get_orchestrator")
+@patch("cooperage.gateway.server.sessions.get_container")
+async def test_get_container_logs_returns_logs(mock_get_container, mock_get_orch, mock_check):
+    mock_get_container.return_value = _info()
+    orch = _mock_orch()
+    orch.get_container_logs.return_value = "line1\nline2\nline3"
+    mock_get_orch.return_value = orch
+    from cooperage.gateway.server import _dispatch
+    token = _set_auth_ctx()
+    try:
+        result = await _dispatch("cooperage_get_container_logs", {
+            "session_id": "s1", "server_name": "sim", "tail": 50,
+        })
+    finally:
+        from cooperage.gateway.server import _auth_ctx
+        _auth_ctx.reset(token)
+    assert result["logs"] == "line1\nline2\nline3"
+    assert result["tail"] == 50
+    orch.get_container_logs.assert_called_once_with("c1", 50)
+
+
+@pytest.mark.asyncio
+@patch("cooperage.gateway.server._check_session_tenant")
+@patch("cooperage.gateway.server.sessions.get_container")
+async def test_get_container_logs_no_container(mock_get_container, mock_check):
+    mock_get_container.return_value = None
+    from cooperage.gateway.server import _dispatch
+    token = _set_auth_ctx()
+    try:
+        result = await _dispatch("cooperage_get_container_logs", {
+            "session_id": "s1", "server_name": "sim",
+        })
+    finally:
+        from cooperage.gateway.server import _auth_ctx
+        _auth_ctx.reset(token)
+    assert result["error"] is True
+
+
 # ── top-level dispatch ────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
