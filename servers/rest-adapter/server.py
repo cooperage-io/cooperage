@@ -16,14 +16,11 @@ import sys
 from pathlib import Path
 
 import httpx
-import uvicorn
+from cooperage_sdk import workspace, serve
 from mcp.server.fastmcp import FastMCP
 
-try:
-    from cooperage_sdk import workspace as _ws
-    WORKSPACE = _ws.root
-except ImportError:
-    WORKSPACE = Path(os.environ.get("COOPERAGE_WORKSPACE", "/workspace"))
+
+WORKSPACE = workspace.root
 
 mcp = FastMCP("cooperage-adapter", json_response=True, stateless_http=True)
 
@@ -352,9 +349,4 @@ if os.environ.get("COOPERAGE_ADAPTER_CONFIG"):
 if __name__ == "__main__":
     if not os.environ.get("COOPERAGE_ADAPTER_CONFIG"):
         raise RuntimeError("COOPERAGE_ADAPTER_CONFIG env var not set")
-    try:
-        from cooperage_sdk import serve
-        serve(mcp)
-    except ImportError:
-        port = int(os.environ.get("PORT", "8000"))
-        uvicorn.run(mcp.streamable_http_app(), host="0.0.0.0", port=port)
+    serve(mcp)
