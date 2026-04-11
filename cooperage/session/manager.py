@@ -317,20 +317,22 @@ def _cleanup_idle_containers() -> None:
             _save()
 
 
+def reap_expired_sessions() -> list[str]:
+    """End all sessions past their TTL. Returns list of reaped session IDs."""
+    now = datetime.now(timezone.utc)
+    with _lock:
+        expired = [sid for sid, s in _sessions.items() if s.expires_at <= now]
+    for sid in expired:
+        logger.info("Session %s expired, cleaning up", sid)
+        end_session(sid)
+    return expired
+
+
 def _cleanup_loop() -> None:
     import time
     while True:
         time.sleep(settings.session_cleanup_interval)
-        now = datetime.now(timezone.utc)
-
-        # Expire whole sessions
-        with _lock:
-            expired = [sid for sid, s in _sessions.items() if s.expires_at <= now]
-        for sid in expired:
-            logger.info("Session %s expired, cleaning up", sid)
-            end_session(sid)
-
-        # Reap idle containers (within active sessions)
+        reap_expired_sessions()
         _cleanup_idle_containers()
 
 

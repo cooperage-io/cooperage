@@ -212,3 +212,37 @@ def test_count_all_expired_returns_zero(mock_get_orch):
         mgr._sessions[s2.id].expires_at = past
 
     assert mgr.count_sessions_for_tenant("alpha") == 0
+
+
+# ── reap_expired_sessions ────────────────────────────────────────────────────
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+def test_reap_removes_expired_sessions(mock_get_orch):
+    """Expired sessions are removed by reap_expired_sessions."""
+    from datetime import datetime, timedelta, timezone
+
+    orch = _mock_orch()
+    mock_get_orch.return_value = orch
+    s1 = mgr.create_session(tenant_id="alpha")
+    s2 = mgr.create_session(tenant_id="alpha")
+
+    # Expire s1 only
+    with mgr._lock:
+        mgr._sessions[s1.id].expires_at = datetime.now(timezone.utc) - timedelta(seconds=60)
+
+    reaped = mgr.reap_expired_sessions()
+    assert s1.id in reaped
+    assert s2.id not in reaped
+    assert mgr.get_session(s1.id) is None
+    assert mgr.get_session(s2.id) is not None
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+def test_reap_returns_empty_when_nothing_expired(mock_get_orch):
+    """No sessions expired means nothing to reap."""
+    mock_get_orch.return_value = _mock_orch()
+    mgr.create_session(tenant_id="alpha")
+
+    reaped = mgr.reap_expired_sessions()
+    assert reaped == []
