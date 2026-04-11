@@ -35,8 +35,11 @@ st.set_page_config(
 
 # ── Sidebar config ────────────────────────────────────────────────────────────
 
+_default_gateway = os.environ.get("GATEWAY_URL", "http://localhost:8080/mcp")
+_default_api_key = os.environ.get("COOPERAGE_API_KEY", "")
+
 st.sidebar.title("⚙️ Settings")
-GATEWAY_URL = st.sidebar.text_input("Gateway URL", value="http://localhost:8080/mcp")
+GATEWAY_URL = st.sidebar.text_input("Gateway URL", value=_default_gateway)
 AUTO_REFRESH = st.sidebar.slider("Auto-refresh (seconds)", 1, 30, 1)
 
 
@@ -46,12 +49,13 @@ def _render_auth_sidebar() -> None:
     """Render optional auth token input for enterprise deployments."""
     with st.sidebar.expander("🔑 Authentication", expanded=not _get_token()):
         st.caption("Leave blank for local mode. Required when the gateway has enterprise auth enabled.")
-        st.text_input("API key or JWT", type="password", key="auth_token")
+        st.text_input("API key or JWT", type="password", key="auth_token",
+                       value=st.session_state.get("auth_token", _default_api_key))
 
 
 def _get_token() -> str:
-    """Return the current auth token from manual entry."""
-    return st.session_state.get("auth_token", "")
+    """Return the current auth token from manual entry or env var."""
+    return st.session_state.get("auth_token", _default_api_key)
 
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────

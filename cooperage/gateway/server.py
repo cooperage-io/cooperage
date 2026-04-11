@@ -244,6 +244,14 @@ async def pull_server(server_name: str, **kwargs) -> dict:
 )
 async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -> dict:
     from cooperage.core.config import settings as _settings
+
+    if auth.max_sessions is not None:
+        current = sessions.count_sessions_for_tenant(auth.tenant_id)
+        if current >= auth.max_sessions:
+            raise PermissionError(
+                f"Tenant {auth.tenant_id!r} has reached the session limit ({auth.max_sessions})"
+            )
+
     session = sessions.create_session(name=name, tenant_id=auth.tenant_id)
     
     curr_event = AuditEvent(
