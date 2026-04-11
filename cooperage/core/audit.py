@@ -26,6 +26,10 @@ class AuditEventType(str, Enum):
     CONTAINER_START = "container_start"
     CONTAINER_STOP = "container_stop"
     WORKSPACE_WRITE = "workspace_write"
+    JOB_START = "job_start"
+    JOB_COMPLETE = "job_complete"
+    JOB_FAIL = "job_fail"
+    JOB_CANCEL = "job_cancel"
 
 
 class AuditEvent(BaseModel):

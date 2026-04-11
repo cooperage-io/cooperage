@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # Session persistence
     sessions_path: Path = Path.home() / ".cooperage" / "sessions.json"
 
+    # Jobs
+    jobs_path: Path = Path.home() / ".cooperage" / "jobs.json"
+    job_default_timeout: int = 14400  # 4 hours max for async jobs
+
     # Gateway
     gateway_host: str = "0.0.0.0"
     gateway_port: int = 8080
