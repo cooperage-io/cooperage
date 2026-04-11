@@ -470,6 +470,40 @@ def main_content() -> None:
             except Exception as e:
                 st.error(f"Failed to set expiry: {e}")
 
+    # ── Jobs panel ────────────────────────────────────────────────────────────
+    try:
+        jobs_raw = call_tool("cooperage_job_status", {"session_id": session_id})
+        all_jobs = json.loads(jobs_raw) if isinstance(jobs_raw, str) else jobs_raw
+        if not isinstance(all_jobs, list):
+            all_jobs = []
+    except Exception:
+        all_jobs = []
+
+    if all_jobs:
+        with st.expander(f"Jobs ({len(all_jobs)})", expanded=False):
+            for j in all_jobs:
+                jid = j.get("id", "?")[:8]
+                status = j.get("status", "?")
+                tool = j.get("tool_name", "?")
+                server = j.get("server_name", "?")
+                status_icon = {
+                    "pending": "⏳", "running": "🔄", "completed": "✅",
+                    "failed": "❌", "cancelled": "🚫", "lost": "⚠️",
+                }.get(status, "❓")
+                col_info, col_action = st.columns([4, 1])
+                with col_info:
+                    st.caption(f"{status_icon} `{jid}` — {server}/{tool} — **{status}**")
+                with col_action:
+                    if status in ("running", "pending"):
+                        if st.button("Cancel", key=f"cancel_job_{jid}", use_container_width=True):
+                            try:
+                                call_tool("cooperage_cancel_job", {
+                                    "session_id": session_id, "job_id": j["id"],
+                                })
+                                st.rerun()
+                            except Exception as e:
+                                st.error(str(e))
+
     col_containers, col_files, col_preview = st.columns([1, 1, 2])
 
     # ── Containers panel ──────────────────────────────────────────────────────
