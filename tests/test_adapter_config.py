@@ -110,24 +110,6 @@ def test_langchain_with_package():
     assert config.package == "my-package==1.0.0"
 
 
-# ── Python config ────────────────────────────────────────────────────────────
-
-
-def test_parse_python_config():
-    data = {
-        "name": "utils",
-        "type": "python",
-        "source": "/workspace/utils.py",
-        "python_tools": [
-            {"name": "process", "function": "process_data", "description": "Process CSV"},
-        ],
-    }
-    config = AdapterConfig(**data)
-    assert config.type == AdapterType.PYTHON
-    assert len(config.python_tools) == 1
-    assert config.python_tools[0].function == "process_data"
-
-
 # ── Serialization ────────────────────────────────────────────────────────────
 
 

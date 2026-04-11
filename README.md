@@ -77,7 +77,7 @@ tools:
 uv run cooperage register --from weather-api.yaml --env WEATHER_API_KEY=sk-xxx
 ```
 
-**Option C — Wrap Python functions or LangChain tools**:
+**Option C — Wrap LangChain tools**:
 
 ```yaml
 # my-tools.yaml
@@ -185,9 +185,10 @@ Don't want to write a Docker image? Use `cooperage register --from` with a YAML 
 
 | Type | What you provide | What happens |
 |------|-----------------|--------------|
-| `rest-api` | Base URL, auth, tool definitions | HTTP calls proxied to your API |
-| `langchain` | Python file or pip package with `@tool` functions | Functions wrapped and exposed |
-| `python` | Python file with plain functions | Functions wrapped and exposed |
+| `rest-api` | Base URL, auth, tool definitions | HTTP calls proxied to your API (no container) |
+| `langchain` | Python file or pip package with `@tool` functions | Auto-discovered and wrapped |
+
+For plain Python functions, use the SDK's `serve_functions()` — three lines, no YAML needed. See [cooperage-sdk](https://github.com/cooperage-io/cooperage-sdk).
 
 Auth credentials use `${ENV_VAR}` syntax — secrets are passed via `--env`, never stored in config files.
 

@@ -1,8 +1,8 @@
 """
 Adapter configuration models — shared between the CLI and the adapter server.
 
-Defines the YAML/JSON schema for wrapping REST APIs, LangChain tools,
-and Python functions as MCP servers.
+Defines the YAML/JSON schema for wrapping REST APIs and LangChain tools
+as Cooperage servers.
 """
 
 from enum import Enum
@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 class AdapterType(str, Enum):
     REST_API = "rest-api"
     LANGCHAIN = "langchain"
-    PYTHON = "python"
 
 
 class ParamLocation(str, Enum):
@@ -49,17 +48,6 @@ class RestToolDef(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)
 
 
-class LangChainToolRef(BaseModel):
-    name: str  # name of the tool to expose (must match the @tool name or class name)
-
-
-class PythonToolDef(BaseModel):
-    name: str
-    function: str  # function name in the module
-    description: str = ""
-    params: dict[str, ParamDef] = Field(default_factory=dict)
-
-
 class AdapterConfig(BaseModel):
     name: str
     type: AdapterType
@@ -70,13 +58,12 @@ class AdapterConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     default_headers: dict[str, str] = Field(default_factory=dict)
 
-    # LangChain / Python fields
+    # LangChain fields
     source: str | None = None  # file path or module import path
     package: str | None = None  # pip package to install at startup
 
     # Tools (polymorphic based on type)
     rest_tools: list[RestToolDef] = Field(default_factory=list, alias="tools")
     langchain_tools: list[str] = Field(default_factory=list)  # tool names to expose (empty = all)
-    python_tools: list[PythonToolDef] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}

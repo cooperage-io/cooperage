@@ -265,67 +265,6 @@ def _register_one_langchain_tool(name: str, lc_tool):
 # ── Python function adapter ──────────────────────────────────────────────────
 
 
-def _register_python_tools(config: dict):
-    source = config.get("source")
-    package = config.get("package")
-    tools = config.get("python_tools", [])
-
-    if package:
-        subprocess.check_call([sys.executable, "-m", "uv", "pip", "install", "--system", package])
-
-    if not source:
-        raise RuntimeError("Python adapter requires 'source' field")
-
-    mod = _import_module_from_source(source)
-
-    for tool_def in tools:
-        func_name = tool_def.get("function", tool_def["name"])
-        func = getattr(mod, func_name, None)
-        if func is None:
-            raise RuntimeError(f"Function {func_name!r} not found in {source}")
-        _register_one_python_tool(tool_def, func)
-
-
-def _register_one_python_tool(tool_def: dict, func):
-    name = tool_def["name"]
-    description = tool_def.get("description", "") or (func.__doc__ or "")
-    params = tool_def.get("params", {})
-
-    properties = {}
-    required = []
-    for pname, pdef in params.items():
-        prop = {"type": pdef.get("type", "string")}
-        if pdef.get("description"):
-            prop["description"] = pdef["description"]
-        properties[pname] = prop
-        if pdef.get("required", True):
-            required.append(pname)
-
-    schema = {"type": "object", "properties": properties, "required": required}
-
-    def make_handler(f):
-        async def handler(**kwargs):
-            import asyncio
-            if asyncio.iscoroutinefunction(f):
-                result = await f(**kwargs)
-            else:
-                result = f(**kwargs)
-            if isinstance(result, str):
-                return result
-            return json.dumps(result, indent=2, default=str)
-        handler.__name__ = name
-        handler.__doc__ = description
-        return handler
-
-    fn = make_handler(func)
-    mcp._tool_manager._tools[name] = type("ToolMeta", (), {
-        "name": name,
-        "description": description,
-        "parameters": schema,
-        "fn": fn,
-    })()
-
-
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
@@ -337,8 +276,6 @@ def setup():
         _register_rest_tools(config)
     elif adapter_type == "langchain":
         _register_langchain_tools(config)
-    elif adapter_type == "python":
-        _register_python_tools(config)
     else:
         raise RuntimeError(f"Unknown adapter type: {adapter_type!r}")
 
