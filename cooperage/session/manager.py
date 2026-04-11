@@ -138,7 +138,8 @@ def list_sessions(tenant_id: str | None = None) -> list[Session]:
             entry_copy = dict(e)
             entry_copy.pop("_containers", None)
             file_sessions[e["id"]] = Session(**entry_copy)
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to load sessions from %s: %s", path, e)
         file_ids = None
         file_sessions = {}
     with _lock:

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 
 import typer
 from rich.console import Console
@@ -102,13 +103,15 @@ def start(
     host: str = typer.Option("0.0.0.0", help="Host to bind (SSE mode only)"),
     port: int = typer.Option(8080, help="Port to bind (SSE mode only)"),
     proxy: str = typer.Option(None, "--proxy", help="Forward all MCP traffic to a remote gateway URL"),
-    api_key: str = typer.Option(None, "--api-key", help="API key for authenticating with a remote gateway (used with --proxy)"),
+    api_key: str = typer.Option(None, "--api-key", help="API key for authenticating with a remote gateway (used with --proxy). Also reads COOPERAGE_API_KEY env var."),
 ):
     """Start the Cooperage MCP gateway."""
     from cooperage.gateway.server import run_proxy, run_stdio, run_sse
 
+    resolved_key = api_key or os.environ.get("COOPERAGE_API_KEY")
+
     if proxy:
-        asyncio.run(run_proxy(proxy, api_key=api_key))
+        asyncio.run(run_proxy(proxy, api_key=resolved_key))
     elif sse:
         console.print(f"[green]Starting Cooperage gateway (SSE)[/] on {host}:{port}")
         asyncio.run(run_sse(host=host, port=port))
