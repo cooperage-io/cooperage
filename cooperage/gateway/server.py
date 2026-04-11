@@ -854,7 +854,7 @@ async def _handle_upload(scope, receive, send) -> None:
 
 # ── Entry points ──────────────────────────────────────────────────────────────
 
-async def run_proxy(url: str) -> None:
+async def run_proxy(url: str, *, api_key: str | None = None) -> None:
     """Bridge stdio (Claude Desktop) to a remote Cooperage gateway over HTTP.
 
     Forwards every MCP message from stdin to the remote gateway and streams
@@ -863,7 +863,13 @@ async def run_proxy(url: str) -> None:
     import anyio
     from mcp.client.streamable_http import streamable_http_client
 
-    async with streamable_http_client(url) as (remote_read, remote_write, _):
+    client_kwargs = {}
+    if api_key:
+        client_kwargs["http_client"] = httpx.AsyncClient(
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+
+    async with streamable_http_client(url, **client_kwargs) as (remote_read, remote_write, _):
         async with stdio_server() as (local_read, local_write):
             async def stdin_to_remote() -> None:
                 async with remote_write:
