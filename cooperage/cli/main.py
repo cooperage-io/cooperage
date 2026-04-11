@@ -55,18 +55,30 @@ def register(
             data = json.loads(raw)
 
         config = AdapterConfig(**data)
-        adapter_env = {"COOPERAGE_ADAPTER_CONFIG": config.model_dump_json()}
-        adapter_env.update(env_dict)
+        adapter_type = config.type.value
 
-        server = ServerDef(
-            name=config.name,
-            image="cooperage-adapter:latest",
-            description=config.description or f"Adapter: {config.type.value}",
-            port=8000,
-            env=adapter_env,
-        )
+        if adapter_type == "rest-api":
+            # REST APIs run inline in the gateway — no container needed
+            server = ServerDef(
+                name=config.name,
+                description=config.description or f"REST API adapter",
+                env=env_dict,
+                adapter_config=data,
+            )
+        else:
+            # LangChain/Python adapters need a container for code execution
+            adapter_env = {"COOPERAGE_ADAPTER_CONFIG": config.model_dump_json()}
+            adapter_env.update(env_dict)
+            server = ServerDef(
+                name=config.name,
+                image="cooperage-adapter:latest",
+                description=config.description or f"Adapter: {adapter_type}",
+                port=8000,
+                env=adapter_env,
+            )
+
         registry.register(server)
-        console.print(f"[green]Registered adapter[/] [bold]{config.name}[/] (type: {config.type.value})")
+        console.print(f"[green]Registered adapter[/] [bold]{config.name}[/] (type: {adapter_type})")
         return
 
     if not name or not image:

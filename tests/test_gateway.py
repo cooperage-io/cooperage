@@ -358,6 +358,58 @@ async def test_get_container_logs_no_container(mock_get_container, mock_check):
     assert result["error"] is True
 
 
+# ── inline REST adapter ──────────────────────────────────────────────────────
+
+
+def test_is_rest_adapter_true():
+    from cooperage.gateway.server import _is_rest_adapter
+    from cooperage.core.models import ServerDef
+    with patch("cooperage.gateway.server.registry.get") as mock_get:
+        mock_get.return_value = ServerDef(
+            name="weather",
+            adapter_config={"type": "rest-api", "base_url": "https://api.example.com", "tools": []},
+        )
+        assert _is_rest_adapter("weather") is True
+
+
+def test_is_rest_adapter_false_for_docker_server():
+    from cooperage.gateway.server import _is_rest_adapter
+    from cooperage.core.models import ServerDef
+    with patch("cooperage.gateway.server.registry.get") as mock_get:
+        mock_get.return_value = ServerDef(name="sim", image="sim:latest")
+        assert _is_rest_adapter("sim") is False
+
+
+def test_rest_adapter_list_tools():
+    from cooperage.gateway.server import _rest_adapter_list_tools
+    from cooperage.core.models import ServerDef
+    with patch("cooperage.gateway.server.registry.get") as mock_get:
+        mock_get.return_value = ServerDef(
+            name="weather",
+            adapter_config={
+                "type": "rest-api",
+                "base_url": "https://api.example.com",
+                "tools": [
+                    {
+                        "name": "get_forecast",
+                        "description": "Get weather",
+                        "method": "GET",
+                        "path": "/forecast",
+                        "params": {
+                            "lat": {"type": "number", "description": "Latitude"},
+                            "lon": {"type": "number", "description": "Longitude"},
+                        },
+                    },
+                ],
+            },
+        )
+        tools = _rest_adapter_list_tools("weather")
+        assert len(tools) == 1
+        assert tools[0]["name"] == "get_forecast"
+        assert "lat" in tools[0]["inputSchema"]["properties"]
+        assert "lon" in tools[0]["inputSchema"]["properties"]
+
+
 # ── top-level dispatch ────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
