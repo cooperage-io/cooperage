@@ -165,3 +165,50 @@ def test_get_or_start_container_raises_for_unknown_session():
     from cooperage.core.errors import SessionNotFoundError
     with pytest.raises(SessionNotFoundError, match="not found"):
         mgr.get_or_start_container("nosuchid", _server_def())
+
+
+# ── count_sessions_for_tenant (quota support) ────────────────────────────────
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+def test_count_sessions_for_tenant(mock_get_orch):
+    mock_get_orch.return_value = _mock_orch()
+    mgr.create_session(tenant_id="alpha")
+    mgr.create_session(tenant_id="alpha")
+    mgr.create_session(tenant_id="beta")
+    assert mgr.count_sessions_for_tenant("alpha") == 2
+    assert mgr.count_sessions_for_tenant("beta") == 1
+    assert mgr.count_sessions_for_tenant("unknown") == 0
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+def test_count_excludes_expired_sessions(mock_get_orch):
+    """Expired sessions should not count against a tenant's quota."""
+    from datetime import datetime, timedelta, timezone
+
+    mock_get_orch.return_value = _mock_orch()
+    s1 = mgr.create_session(tenant_id="alpha")
+    s2 = mgr.create_session(tenant_id="alpha")
+
+    # Expire one session by backdating its expiry
+    with mgr._lock:
+        mgr._sessions[s1.id].expires_at = datetime.now(timezone.utc) - timedelta(seconds=60)
+
+    assert mgr.count_sessions_for_tenant("alpha") == 1
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+def test_count_all_expired_returns_zero(mock_get_orch):
+    """If all sessions are expired, count should be zero."""
+    from datetime import datetime, timedelta, timezone
+
+    mock_get_orch.return_value = _mock_orch()
+    s1 = mgr.create_session(tenant_id="alpha")
+    s2 = mgr.create_session(tenant_id="alpha")
+
+    with mgr._lock:
+        past = datetime.now(timezone.utc) - timedelta(seconds=60)
+        mgr._sessions[s1.id].expires_at = past
+        mgr._sessions[s2.id].expires_at = past
+
+    assert mgr.count_sessions_for_tenant("alpha") == 0
