@@ -289,14 +289,14 @@ def set_session_expiry(session_id: str, expires_at: datetime) -> datetime:
 
 
 def touch_session(session_id: str) -> None:
-    """Extend session TTL on activity (if enabled)."""
+    """Extend session TTL on activity (if enabled). Never shortens the expiry."""
     if not settings.session_extend_on_activity:
         return
     now = datetime.now(timezone.utc)
     new_expiry = now + timedelta(seconds=settings.session_ttl_seconds)
     with _lock:
         session = _sessions.get(session_id)
-        if session is not None:
+        if session is not None and new_expiry > session.expires_at:
             session.expires_at = new_expiry
             _save()
 

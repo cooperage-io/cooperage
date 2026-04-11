@@ -447,9 +447,10 @@ def main_content() -> None:
                 available_options[f"{capped_h}h from now (max)"] = capped_remaining
             break
 
-    exp_col, exp_btn_col = st.columns([3, 1])
-    with exp_col:
-        st.caption(f"Expires: {remaining_str}")
+    exp_label_col, exp_select_col, exp_btn_col = st.columns([2, 2, 1])
+    with exp_label_col:
+        st.caption(f"⏱ {remaining_str}")
+    with exp_select_col:
         if available_options:
             selected_expiry = st.selectbox(
                 "Set expiry to",
@@ -458,7 +459,6 @@ def main_content() -> None:
                 label_visibility="collapsed",
             )
     with exp_btn_col:
-        st.caption("")
         if available_options and st.button("Set", key=f"set_expiry__{session_id}", use_container_width=True):
             new_expiry = now + available_options[selected_expiry]
             try:

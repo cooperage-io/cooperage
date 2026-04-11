@@ -142,6 +142,22 @@ def test_touch_session_disabled_does_not_extend(mock_get_orch, monkeypatch):
     assert mgr._sessions[session.id].expires_at == original_expiry
 
 
+@patch("cooperage.session.manager.get_orchestrator")
+def test_touch_session_never_shortens_expiry(mock_get_orch, monkeypatch):
+    """If expiry was manually extended beyond the default TTL, touch should not shorten it."""
+    from datetime import timedelta, timezone, datetime
+    monkeypatch.setattr("cooperage.session.manager.settings.session_extend_on_activity", True)
+    monkeypatch.setattr("cooperage.session.manager.settings.session_ttl_seconds", 1800)
+    mock_get_orch.return_value = _mock_orch()
+    session = mgr.create_session()
+    # Manually set expiry to 12 hours from now
+    far_future = datetime.now(timezone.utc) + timedelta(hours=12)
+    mgr._sessions[session.id].expires_at = far_future
+    mgr.touch_session(session.id)
+    # Should still be 12 hours, not reset to 30 minutes
+    assert mgr._sessions[session.id].expires_at == far_future
+
+
 # ── Idle container cleanup ────────────────────────────────────────────────────
 
 @patch("cooperage.session.manager.get_orchestrator")
