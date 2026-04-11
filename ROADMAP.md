@@ -10,6 +10,7 @@
 - [x] Built-in compute server — `run_script` (Python) and `run_bash`, numpy/pandas/scipy/matplotlib/sklearn pre-installed, `uv` for live package installs
 - [x] File-based session persistence — stdio and SSE gateway share state via configurable path
 - [x] Container idle timeout + session activity TTL extension
+- [x] User-facing session expiry control — `cooperage_set_session_expiry` tool + UI dropdown, capped at 72h from creation
 - [x] Network isolation — per-session bridge networks
 - [x] Resource limits — CPU/memory configurable at registration and via config
 - [x] `repo_url` on `ServerDef` — LLM can inspect server source when debugging
@@ -28,12 +29,14 @@
 - [x] Hosted Streamlit UI — live session/container/workspace viewer at port 8501
 - [x] `cooperage start --proxy <url>` — Claude Desktop (stdio) → remote cloud gateway bridge
 - [x] `COOPERAGE_UI_URL` — gateway returns session-scoped UI link in `create_session` response
+- [x] Enterprise Docker image — layers cooperage-enterprise on core image via explicit `entrypoint.py` (no plugin discovery magic)
+- [x] `--api-key` / `COOPERAGE_API_KEY` — proxy mode auth for enterprise gateways
 
 ### Developer Experience
 - [x] `cooperage ui` — local Streamlit viewer with session selector, container panel, file preview, upload
 - [x] Image preview — binary files base64-encoded, rendered in browser
 - [x] `simulator` + `analysis` example servers
-- [x] 161 unit tests (mocked) + cloud integration test suite against live droplet
+- [x] 212 unit tests (159 core + 53 enterprise) + cloud integration test suite against live droplet
 - [x] MIT license, cooperage-io GitHub org
 - [x] Helm chart — gateway Deployment + ServiceAccount + Role + ConfigMap + Ingress + UI sidecar
 - [x] `/health` endpoint — K8s liveness/readiness probes
