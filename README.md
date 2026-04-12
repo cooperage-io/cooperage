@@ -8,7 +8,7 @@ Give your AI tools their own compute. Cooperage runs each tool in an isolated co
 
 ## The problem
 
-You've got tools. Maybe a simulation engine, an image analyzer, a data pipeline. You can call them one at a time, but what happens when your LLM needs to chain them together, pass data between them, and run them on real infrastructure?
+You've got tools. Maybe a simulation engine, an analysis library, a data pipeline. You can call them one at a time, but what happens when your LLM needs to chain them together, pass data between them, and run them on real infrastructure?
 
 Cooperage is that infrastructure layer. Register your tools, and your LLM orchestrates them across isolated containers that share a workspace volume. Data flows through files, not context windows.
 
