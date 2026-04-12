@@ -290,6 +290,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "cooperage-sdk" },
     { name = "numpy" },
     { name = "pillow" },
     { name = "pytest" },
@@ -318,6 +319,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "cooperage-sdk", specifier = ">=0.1.0" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "pillow", specifier = ">=10.0.0" },
     { name = "pytest", specifier = ">=8.0.0" },
@@ -326,6 +328,19 @@ dev = [
     { name = "ruff", specifier = ">=0.4.0" },
     { name = "streamlit", specifier = ">=1.35.0" },
     { name = "watchdog", specifier = ">=6.0.0" },
+]
+
+[[package]]
+name = "cooperage-sdk"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mcp", extra = ["cli"] },
+    { name = "uvicorn" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e2/1a/53a2d38b7c72e3d0b86abe6a8510ff7b027568a73eab22858fb559a3e1a5/cooperage_sdk-0.1.0.tar.gz", hash = "sha256:b03471e949466df7405152ad883a61211bf8959f55102dec5855ffff930e14d4", size = 43298, upload-time = "2026-04-10T01:55:12.278Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7a/5f/a90de5ab6223f71e9ece8f7e895b2f6664271571f8cb42d45a78059c5d9f/cooperage_sdk-0.1.0-py3-none-any.whl", hash = "sha256:cb25ba45371df32032583aa05784b9830415e694ddf7dbaa25af1a0458360e1f", size = 3742, upload-time = "2026-04-10T01:55:11.034Z" },
 ]
 
 [[package]]
