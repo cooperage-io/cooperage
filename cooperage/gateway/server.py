@@ -141,10 +141,11 @@ def tool(
 @tool(
     "cooperage_list_servers",
     description=(
-        "Discover what specialized servers are available in this Cooperage deployment. "
-        "Always call this first — registered servers may already provide domain-specific "
-        "tools (e.g. simulators, analyzers, data pipelines) that are faster and more "
-        "capable than writing a general script. "
+        "Discover what servers and APIs are available in this Cooperage deployment. "
+        "Always call this first — registered servers include both containerized tools "
+        "(simulators, analyzers, data pipelines) and connected REST APIs (external services "
+        "like weather, search, databases). These are faster and more capable than writing "
+        "a general script. "
         "After listing, pull the servers you plan to use with cooperage_pull_server. "
         "If a server has a repo_url, you can clone it with cooperage_run_bash to inspect "
         "its source code when debugging unexpected tool behavior."
