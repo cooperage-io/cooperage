@@ -14,13 +14,14 @@ logging.basicConfig(level=logging.WARNING)
 
 @app.command()
 def register(
-    name: str = typer.Option(..., help="Short name for this server"),
-    image: str = typer.Option(..., help="Docker image (e.g. cooperage-image-analyzer:latest)"),
+    name: str = typer.Option(None, help="Short name for this server"),
+    image: str = typer.Option(None, help="Docker image (e.g. cooperage-image-analyzer:latest)"),
     description: str = typer.Option("", help="Human-readable description"),
     port: int = typer.Option(8000, help="Port the MCP server listens on inside the container"),
     env: list[str] = typer.Option([], help="Environment variables in KEY=VALUE format"),
+    from_file: str = typer.Option(None, "--from", help="YAML/JSON adapter config file (wraps REST APIs, LangChain tools, or Python functions)"),
 ):
-    """Register a Docker image as an MCP server."""
+    """Register a Docker image as an MCP server, or wrap an external tool via --from."""
     from cooperage.core.models import ServerDef
     import cooperage.registry.registry as registry
 
@@ -31,6 +32,58 @@ def register(
             raise typer.Exit(1)
         k, v = e.split("=", 1)
         env_dict[k] = v
+
+    if from_file:
+        from cooperage.adapter.config import AdapterConfig
+        from pathlib import Path
+        import json
+
+        path = Path(from_file)
+        if not path.exists():
+            console.print(f"[red]Config file not found: {from_file}[/]")
+            raise typer.Exit(1)
+
+        raw = path.read_text()
+        if path.suffix in (".yaml", ".yml"):
+            try:
+                import yaml
+                data = yaml.safe_load(raw)
+            except ImportError:
+                console.print("[red]pyyaml required for YAML configs. Install with: uv add pyyaml[/]")
+                raise typer.Exit(1)
+        else:
+            data = json.loads(raw)
+
+        config = AdapterConfig(**data)
+        adapter_type = config.type.value
+
+        if adapter_type == "rest-api":
+            # REST APIs run inline in the gateway — no container needed
+            server = ServerDef(
+                name=config.name,
+                description=config.description or f"REST API adapter",
+                env=env_dict,
+                adapter_config=data,
+            )
+        else:
+            # LangChain/Python adapters need a container for code execution
+            adapter_env = {"COOPERAGE_ADAPTER_CONFIG": config.model_dump_json()}
+            adapter_env.update(env_dict)
+            server = ServerDef(
+                name=config.name,
+                image="cooperage-adapter:latest",
+                description=config.description or f"Adapter: {adapter_type}",
+                port=8000,
+                env=adapter_env,
+            )
+
+        registry.register(server)
+        console.print(f"[green]Registered adapter[/] [bold]{config.name}[/] (type: {adapter_type})")
+        return
+
+    if not name or not image:
+        console.print("[red]--name and --image are required (or use --from for adapter configs)[/]")
+        raise typer.Exit(1)
 
     server = ServerDef(name=name, image=image, description=description, port=port, env=env_dict)
     registry.register(server)

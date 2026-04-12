@@ -12,6 +12,7 @@ import contextvars
 import itertools
 import json
 import logging
+import os
 from typing import Any
 
 import httpx
@@ -140,10 +141,11 @@ def tool(
 @tool(
     "cooperage_list_servers",
     description=(
-        "Discover what specialized servers are available in this Cooperage deployment. "
-        "Always call this first — registered servers may already provide domain-specific "
-        "tools (e.g. simulators, analyzers, data pipelines) that are faster and more "
-        "capable than writing a general script. "
+        "Discover what servers and APIs are available in this Cooperage deployment. "
+        "Always call this first — registered servers include both containerized tools "
+        "(simulators, analyzers, data pipelines) and connected REST APIs (external services "
+        "like weather, search, databases). These are faster and more capable than writing "
+        "a general script. "
         "After listing, pull the servers you plan to use with cooperage_pull_server. "
         "If a server has a repo_url, you can clone it with cooperage_run_bash to inspect "
         "its source code when debugging unexpected tool behavior."
@@ -164,9 +166,13 @@ def list_servers(auth: AuthContext, **kwargs) -> list[dict]:
         entry = {
             "name": s.name,
             "description": s.description,
-            "image": s.image,
-            "cached": orch.image_exists(s.image),
         }
+        if s.adapter_config and s.adapter_config.get("type") == "rest-api":
+            entry["type"] = "rest-api"
+            entry["cached"] = True  # no image to pull
+        else:
+            entry["image"] = s.image
+            entry["cached"] = orch.image_exists(s.image)
         if s.repo_url:
             entry["repo_url"] = s.repo_url
         servers.append(entry)
@@ -273,6 +279,9 @@ async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -
         task = asyncio.create_task(_warmup_builtin(session.id, server_def))
         tasks.append(task)
     _warmup_tasks[session.id] = tasks
+    # List available servers for this tenant so the LLM knows what's available
+    available = list_servers(auth=auth)
+
     lines = [
         f"Session created. session_id: {session.id}",
         f"Workspace volume: {session.volume_name}",
@@ -281,6 +290,11 @@ async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -
     if _settings.ui_url:
         ui_url = f"{_settings.ui_url.rstrip('/')}/?session={session.id}"
         lines.append(f"IMPORTANT: Share this link with the user so they can monitor files and containers in real time: {ui_url}")
+    if available:
+        lines.append("\nAvailable servers and APIs:")
+        for s in available:
+            server_type = s.get("type", "container")
+            lines.append(f"  - {s['name']}: {s.get('description', '')} [{server_type}]")
     return "\n".join(lines)
 
 
@@ -299,6 +313,8 @@ async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -
     requires_server=True,
 )
 async def proxy_list_tools(session_id: str, server_name: str, **kwargs) -> list[dict]:
+    if _is_rest_adapter(server_name):
+        return _rest_adapter_list_tools(server_name)
     info = await _ensure_container(session_id, server_name)
     payload = {"jsonrpc": "2.0", "id": next(_rpc_id_counter), "method": "tools/list", "params": {}}
     client = await _get_http_client()
@@ -380,6 +396,8 @@ async def proxy_read_resource(session_id: str, server_name: str, uri: str, **kwa
     requires_server=True,
 )
 async def call_tool_proxy(session_id: str, server_name: str, tool_name: str, arguments: dict | None = None, **kwargs):
+    if _is_rest_adapter(server_name):
+        return await _rest_adapter_call_tool(server_name, tool_name, arguments or {})
     return await _proxy_call_tool(session_id, server_name, tool_name, arguments or {})
 
 
@@ -733,6 +751,135 @@ async def _ensure_container(session_id: str, server_name: str) -> ContainerInfo:
 async def _workspace_op(session_id: str, tool_name: str, arguments: dict) -> Any:
     """Route a workspace tool call through the built-in workspace container."""
     return await _proxy_call_tool(session_id, _WORKSPACE_SERVER_NAME, tool_name, arguments)
+
+
+# ── Inline REST adapter ──────────────────────────────────────────────────────
+
+
+def _is_rest_adapter(server_name: str) -> bool:
+    """Check if a server is an inline REST adapter (no container needed)."""
+    server_def = registry.get(server_name)
+    return (
+        server_def is not None
+        and server_def.adapter_config is not None
+        and server_def.adapter_config.get("type") == "rest-api"
+    )
+
+
+def _rest_adapter_list_tools(server_name: str) -> list[dict]:
+    """Return tool definitions from an inline REST adapter config."""
+    server_def = registry.get(server_name)
+    config = server_def.adapter_config
+    tools = config.get("tools", [])
+    result = []
+    for t in tools:
+        params = t.get("params", {})
+        properties = {}
+        required = []
+        for pname, pdef in params.items():
+            prop = {"type": pdef.get("type", "string")}
+            if pdef.get("description"):
+                prop["description"] = pdef["description"]
+            properties[pname] = prop
+            if pdef.get("required", True):
+                required.append(pname)
+        result.append({
+            "name": t["name"],
+            "description": t.get("description", ""),
+            "inputSchema": {"type": "object", "properties": properties, "required": required},
+        })
+    return result
+
+
+async def _rest_adapter_call_tool(server_name: str, tool_name: str, arguments: dict) -> str:
+    """Execute a REST API call inline (no container)."""
+    import base64
+    import re
+
+    server_def = registry.get(server_name)
+    config = server_def.adapter_config
+    base_url = config.get("base_url", "").rstrip("/")
+    auth = config.get("auth", {})
+    default_headers = config.get("default_headers", {})
+    env = server_def.env
+
+    tool_def = None
+    for t in config.get("tools", []):
+        if t["name"] == tool_name:
+            tool_def = t
+            break
+    if tool_def is None:
+        raise ToolExecutionError(f"Tool {tool_name!r} not found on REST adapter {server_name!r}")
+
+    method = tool_def.get("method", "GET").upper()
+    url = base_url + tool_def.get("path", "/")
+    params = tool_def.get("params", {})
+    extra_headers = tool_def.get("headers", {})
+
+    # Resolve ${ENV_VAR} references
+    def resolve_env(value):
+        if not isinstance(value, str):
+            return value
+        return re.sub(r"\$\{(\w+)\}", lambda m: env.get(m.group(1), os.environ.get(m.group(1), "")), value)
+
+    # Build auth headers
+    headers = {k: resolve_env(v) for k, v in {**default_headers, **extra_headers}.items()}
+    auth_type = auth.get("type", "none")
+    if auth_type == "bearer":
+        token = resolve_env(auth.get("token", ""))
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+    elif auth_type == "api-key":
+        key = resolve_env(auth.get("api_key", ""))
+        header_name = auth.get("api_key_header", "X-API-Key")
+        if key:
+            headers[header_name] = key
+    elif auth_type == "basic":
+        username = resolve_env(auth.get("username", ""))
+        password = resolve_env(auth.get("password", ""))
+        encoded = base64.b64encode(f"{username}:{password}".encode()).decode()
+        headers["Authorization"] = f"Basic {encoded}"
+
+    # Route params
+    query = {}
+    body = {}
+    for pname, pdef in params.items():
+        value = arguments.get(pname)
+        if value is None:
+            continue
+        location = pdef.get("location")
+        if location is None:
+            location = "query" if method in ("GET", "DELETE") else "body"
+        if location == "path":
+            url = url.replace(f"{{{pname}}}", str(value))
+        elif location == "query":
+            query[pname] = value
+        elif location == "body":
+            body[pname] = value
+        elif location == "header":
+            headers[pname] = str(value)
+
+    client = await _get_http_client()
+    resp = await client.request(
+        method, url,
+        params=query or None,
+        json=body or None,
+        headers=headers,
+    )
+
+    content_type = resp.headers.get("content-type", "")
+    if resp.status_code >= 400:
+        return json.dumps({"error": True, "status": resp.status_code, "body": resp.text[:2000]})
+
+    if "application/json" in content_type:
+        try:
+            return json.dumps(resp.json(), indent=2)
+        except Exception:
+            return resp.text
+    text = resp.text
+    if len(text) > 50000:
+        text = text[:50000] + "\n...[truncated]"
+    return text
 
 
 # ── MCP proxy ─────────────────────────────────────────────────────────────────

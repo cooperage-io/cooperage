@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+from typing import Any
+
 from pydantic import BaseModel, Field, SecretStr
 import uuid
 
@@ -18,13 +20,14 @@ class RegistryCredentials(BaseModel):
 
 class ServerDef(BaseModel):
     name: str
-    image: str
+    image: str = ""  # empty for inline adapters (rest-api)
     port: int = 8000
     description: str = ""
     env: dict[str, str] = Field(default_factory=dict)
     resources: ResourceLimits = Field(default_factory=ResourceLimits)
     registry_credentials: RegistryCredentials | None = None
     repo_url: str | None = None  # Source repo — LLM can clone to inspect tool code
+    adapter_config: dict[str, Any] | None = None  # Inline adapter config (no container needed)
 
 
 class ContainerInfo(BaseModel):
