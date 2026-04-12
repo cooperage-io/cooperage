@@ -279,6 +279,9 @@ async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -
         task = asyncio.create_task(_warmup_builtin(session.id, server_def))
         tasks.append(task)
     _warmup_tasks[session.id] = tasks
+    # List available servers for this tenant so the LLM knows what's available
+    available = list_servers(auth=auth)
+
     lines = [
         f"Session created. session_id: {session.id}",
         f"Workspace volume: {session.volume_name}",
@@ -287,6 +290,11 @@ async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -
     if _settings.ui_url:
         ui_url = f"{_settings.ui_url.rstrip('/')}/?session={session.id}"
         lines.append(f"IMPORTANT: Share this link with the user so they can monitor files and containers in real time: {ui_url}")
+    if available:
+        lines.append("\nAvailable servers and APIs:")
+        for s in available:
+            server_type = s.get("type", "container")
+            lines.append(f"  - {s['name']}: {s.get('description', '')} [{server_type}]")
     return "\n".join(lines)
 
 
