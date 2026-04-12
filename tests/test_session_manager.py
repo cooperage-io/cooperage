@@ -188,7 +188,7 @@ def test_count_excludes_expired_sessions(mock_get_orch):
 
     mock_get_orch.return_value = _mock_orch()
     s1 = mgr.create_session(tenant_id="alpha")
-    s2 = mgr.create_session(tenant_id="alpha")
+    mgr.create_session(tenant_id="alpha")
 
     # Expire one session by backdating its expiry
     with mgr._lock:

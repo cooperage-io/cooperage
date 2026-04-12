@@ -2,8 +2,6 @@
 Adapter config model tests — parsing, validation, defaults.
 """
 
-import json
-import pytest
 
 from cooperage.adapter.config import (
     AdapterConfig, AdapterType, AuthConfig, ParamDef, ParamLocation, RestToolDef,

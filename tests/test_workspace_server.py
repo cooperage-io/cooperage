@@ -5,8 +5,6 @@ Workspace server tests — file I/O, path traversal protection, binary handling.
 import base64
 import json
 import os
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 

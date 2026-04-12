@@ -4,11 +4,7 @@ Tests the server functions directly (no Docker needed).
 """
 
 import base64
-import json
-import os
-from unittest.mock import patch
 
-import pytest
 
 import importlib.util
 from pathlib import Path

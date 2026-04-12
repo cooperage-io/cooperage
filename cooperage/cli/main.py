@@ -61,7 +61,7 @@ def register(
             # REST APIs run inline in the gateway — no container needed
             server = ServerDef(
                 name=config.name,
-                description=config.description or f"REST API adapter",
+                description=config.description or "REST API adapter",
                 env=env_dict,
                 adapter_config=data,
             )
