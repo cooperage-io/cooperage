@@ -506,3 +506,53 @@ async def test_rest_adapter_path_param_url_encoded(mock_get, mock_get_client):
     url = call_args[0][1]  # second positional arg is the URL
     assert "hello%20world" in url
     assert "{item_id}" not in url
+
+
+# ── Fix #9: REST adapter null check ─────────────────────────────────────────
+
+
+def test_rest_adapter_list_tools_raises_when_registry_returns_none():
+    """_rest_adapter_list_tools raises ServerNotFoundError when registry returns None."""
+    from cooperage.gateway.server import _rest_adapter_list_tools
+    from cooperage.core.errors import ServerNotFoundError
+    with patch("cooperage.gateway.server.registry.get", return_value=None):
+        with pytest.raises(ServerNotFoundError, match="No REST adapter config"):
+            _rest_adapter_list_tools("ghost")
+
+
+def test_rest_adapter_list_tools_raises_when_adapter_config_is_none():
+    """_rest_adapter_list_tools raises ServerNotFoundError when adapter_config is None."""
+    from cooperage.gateway.server import _rest_adapter_list_tools
+    from cooperage.core.errors import ServerNotFoundError
+    with patch("cooperage.gateway.server.registry.get") as mock_get:
+        mock_get.return_value = ServerDef(name="sim", image="sim:latest", adapter_config=None)
+        with pytest.raises(ServerNotFoundError, match="No REST adapter config"):
+            _rest_adapter_list_tools("sim")
+
+
+@pytest.mark.asyncio
+@patch("cooperage.gateway.server.registry.get", return_value=None)
+async def test_rest_adapter_call_tool_raises_when_registry_returns_none(mock_get):
+    """_rest_adapter_call_tool raises ServerNotFoundError when registry returns None."""
+    from cooperage.gateway.server import _rest_adapter_call_tool
+    from cooperage.core.errors import ServerNotFoundError
+    with pytest.raises(ServerNotFoundError, match="No REST adapter config"):
+        await _rest_adapter_call_tool("ghost", "some_tool", {})
+
+
+# ── Fix #14: create_session list_servers try/except ─────────────────────────
+
+
+@pytest.mark.asyncio
+@patch("cooperage.gateway.server._warmup_builtin", new_callable=AsyncMock)
+@patch("cooperage.gateway.server.list_servers", side_effect=Exception("registry down"))
+@patch("cooperage.gateway.server.sessions.create_session")
+async def test_create_session_succeeds_when_list_servers_raises(mock_create, mock_list, mock_warmup):
+    """create_session still succeeds even when list_servers raises an exception."""
+    session = _session(name="test-run")
+    mock_create.return_value = session
+    from cooperage.gateway.server import create_session
+    result = await create_session(auth=_DEFAULT_AUTH, name="test-run")
+    assert session.id in result
+    # list_servers was called and failed, but session creation succeeded
+    mock_list.assert_called_once()

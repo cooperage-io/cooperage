@@ -297,3 +297,58 @@ def test_set_expiry_unknown_session():
     future = datetime.now(timezone.utc) + timedelta(hours=1)
     with pytest.raises(SessionNotFoundError):
         mgr.set_session_expiry("nosuchid", future)
+
+
+# ── Fix #7: _save() error handling ──────────────────────────────────────────
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+@patch("cooperage.session.manager._atomic_write", side_effect=OSError("disk full"))
+def test_save_does_not_crash_on_write_error(mock_write, mock_get_orch):
+    """When _atomic_write raises OSError, _save() logs but doesn't crash."""
+    mock_get_orch.return_value = _mock_orch()
+    # create_session calls _save internally; it should not raise
+    session = mgr.create_session()
+    assert session.id  # session was still created in memory
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+@patch("cooperage.session.manager._atomic_write", side_effect=OSError("disk full"))
+def test_save_failure_preserves_in_memory_state(mock_write, mock_get_orch):
+    """After a _save() failure, the in-memory session state is still intact."""
+    mock_get_orch.return_value = _mock_orch()
+    session = mgr.create_session()
+    # Session should still be retrievable from memory
+    assert mgr.get_session(session.id) is not None
+    assert mgr.get_session(session.id).id == session.id
+
+
+# ── Fix #10: Atomic session quota in create_session ─────────────────────────
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+def test_create_session_quota_allows_first_two(mock_get_orch):
+    """create_session with max_sessions=2 allows first two sessions."""
+    mock_get_orch.return_value = _mock_orch()
+    s1 = mgr.create_session(tenant_id="acme", max_sessions=2)
+    s2 = mgr.create_session(tenant_id="acme", max_sessions=2)
+    assert s1.id != s2.id
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+def test_create_session_quota_rejects_third(mock_get_orch):
+    """create_session with max_sessions=2 raises PermissionError on third."""
+    mock_get_orch.return_value = _mock_orch()
+    mgr.create_session(tenant_id="acme", max_sessions=2)
+    mgr.create_session(tenant_id="acme", max_sessions=2)
+    with pytest.raises(PermissionError, match="limit"):
+        mgr.create_session(tenant_id="acme", max_sessions=2)
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+def test_create_session_quota_none_allows_unlimited(mock_get_orch):
+    """create_session with max_sessions=None allows unlimited sessions."""
+    mock_get_orch.return_value = _mock_orch()
+    for _ in range(5):
+        mgr.create_session(tenant_id="acme", max_sessions=None)
+    assert len([s for s in mgr._sessions.values() if s.tenant_id == "acme"]) == 5

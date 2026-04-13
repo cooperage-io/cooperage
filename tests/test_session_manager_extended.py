@@ -237,3 +237,32 @@ def test_get_container_returns_info(mock_get_orch):
 
 def test_get_container_returns_none_for_unknown():
     assert mgr.get_container("nosuchid", "sim") is None
+
+
+# ── Fix #21: _cleanup_loop error handling ────────────────────────────────────
+
+
+@patch("cooperage.session.manager.get_orchestrator")
+@patch("cooperage.session.manager.reap_expired_sessions", side_effect=Exception("db error"))
+def test_cleanup_loop_catches_reap_exception(mock_reap, mock_get_orch, monkeypatch):
+    """_cleanup_loop catches exceptions from reap_expired_sessions and continues."""
+    import time
+    mock_get_orch.return_value = _mock_orch()
+    monkeypatch.setattr("cooperage.session.manager.settings.session_cleanup_interval", 0.01)
+
+    call_count = 0
+    original_sleep = time.sleep
+
+    def counting_sleep(secs):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 2:
+            raise KeyboardInterrupt("stop loop")
+        original_sleep(secs)
+
+    monkeypatch.setattr("time.sleep", counting_sleep)
+
+    # _cleanup_loop should not propagate the reap exception;
+    # it should be caught and the loop continues until our KeyboardInterrupt stops it
+    with pytest.raises(KeyboardInterrupt):
+        mgr._cleanup_loop()
