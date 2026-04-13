@@ -124,3 +124,20 @@ def test_config_round_trip():
     reloaded = AdapterConfig.model_validate_json(dumped)
     assert reloaded.name == "test"
     assert reloaded.auth.token == "${TOKEN}"
+
+
+# ── Validation errors ──────────────────────────────────────────────────────
+
+
+def test_rest_api_without_base_url_raises():
+    """rest-api type without base_url must raise ValueError."""
+    import pytest
+    with pytest.raises(ValueError, match="base_url"):
+        AdapterConfig(name="bad", type="rest-api")
+
+
+def test_langchain_without_source_raises():
+    """langchain type without source must raise ValueError."""
+    import pytest
+    with pytest.raises(ValueError, match="source"):
+        AdapterConfig(name="bad", type="langchain")

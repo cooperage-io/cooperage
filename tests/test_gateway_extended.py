@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cooperage.core.auth import AuthContext
+from cooperage.core.errors import SessionNotFoundError
 from cooperage.core.models import ServerDef, Session
 
 _DEFAULT_AUTH = AuthContext(tenant_id="default")
@@ -188,3 +189,34 @@ def test_list_sessions_tool_default_tenant_shows_all(mock_list):
     from cooperage.gateway.server import list_sessions_tool
     list_sessions_tool(auth=_DEFAULT_AUTH)
     mock_list.assert_called_once_with(tenant_id=None)
+
+
+# ── _check_session_tenant isolation ─────────────────────────────────────────
+
+
+@patch("cooperage.gateway.server.sessions.get_session")
+def test_tenant_a_cannot_access_tenant_b_session(mock_get):
+    """Tenant A must not be able to access a session owned by tenant B."""
+    mock_get.return_value = _session(tenant_id="tenant-b")
+    from cooperage.gateway.server import _check_session_tenant
+    auth_a = AuthContext(tenant_id="tenant-a")
+    with pytest.raises(PermissionError, match="different tenant"):
+        _check_session_tenant("some-session-id", auth_a)
+
+
+@patch("cooperage.gateway.server.sessions.get_session")
+def test_default_tenant_can_access_any_session(mock_get):
+    """The 'default' tenant should be able to access sessions from any tenant."""
+    mock_get.return_value = _session(tenant_id="tenant-x")
+    from cooperage.gateway.server import _check_session_tenant
+    # Should not raise
+    _check_session_tenant("some-session-id", _DEFAULT_AUTH)
+
+
+@patch("cooperage.gateway.server.sessions.get_session")
+def test_check_session_tenant_raises_for_unknown_session(mock_get):
+    """Unknown session IDs should raise SessionNotFoundError."""
+    mock_get.return_value = None
+    from cooperage.gateway.server import _check_session_tenant
+    with pytest.raises(SessionNotFoundError, match="not found"):
+        _check_session_tenant("nonexistent-id", _DEFAULT_AUTH)

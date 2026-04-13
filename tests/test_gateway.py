@@ -418,3 +418,91 @@ async def test_dispatch_unknown_tool_raises(mock_load):
     from cooperage.gateway.server import _dispatch
     with pytest.raises(ValueError, match="Unknown tool"):
         await _dispatch("cooperage_does_not_exist", {})
+
+
+# ── REST adapter error responses ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@patch("cooperage.gateway.server._get_http_client")
+@patch("cooperage.gateway.server.registry.get")
+async def test_rest_adapter_returns_error_json_on_4xx(mock_get, mock_get_client):
+    mock_get.return_value = ServerDef(
+        name="weather",
+        adapter_config={
+            "type": "rest-api",
+            "base_url": "https://api.example.com",
+            "tools": [{"name": "get_forecast", "method": "GET", "path": "/forecast", "params": {}}],
+        },
+    )
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+    mock_resp.text = "Not Found"
+    mock_resp.headers = {"content-type": "application/json"}
+    mock_client = AsyncMock()
+    mock_client.request.return_value = mock_resp
+    mock_get_client.return_value = mock_client
+
+    from cooperage.gateway.server import _rest_adapter_call_tool
+    result = await _rest_adapter_call_tool("weather", "get_forecast", {})
+    parsed = json.loads(result)
+    assert parsed["error"] is True
+    assert parsed["status"] == 404
+
+
+@pytest.mark.asyncio
+@patch("cooperage.gateway.server._get_http_client")
+@patch("cooperage.gateway.server.registry.get")
+async def test_rest_adapter_handles_timeout(mock_get, mock_get_client):
+    import httpx
+    mock_get.return_value = ServerDef(
+        name="weather",
+        adapter_config={
+            "type": "rest-api",
+            "base_url": "https://api.example.com",
+            "tools": [{"name": "get_forecast", "method": "GET", "path": "/forecast", "params": {}}],
+        },
+    )
+    mock_client = AsyncMock()
+    mock_client.request.side_effect = httpx.TimeoutException("timed out")
+    mock_get_client.return_value = mock_client
+
+    from cooperage.gateway.server import _rest_adapter_call_tool
+    with pytest.raises(httpx.TimeoutException):
+        await _rest_adapter_call_tool("weather", "get_forecast", {})
+
+
+@pytest.mark.asyncio
+@patch("cooperage.gateway.server._get_http_client")
+@patch("cooperage.gateway.server.registry.get")
+async def test_rest_adapter_path_param_url_encoded(mock_get, mock_get_client):
+    mock_get.return_value = ServerDef(
+        name="api",
+        adapter_config={
+            "type": "rest-api",
+            "base_url": "https://api.example.com",
+            "tools": [{
+                "name": "get_item",
+                "method": "GET",
+                "path": "/items/{item_id}",
+                "params": {
+                    "item_id": {"type": "string", "location": "path"},
+                },
+            }],
+        },
+    )
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "OK"
+    mock_resp.headers = {"content-type": "text/plain"}
+    mock_client = AsyncMock()
+    mock_client.request.return_value = mock_resp
+    mock_get_client.return_value = mock_client
+
+    from cooperage.gateway.server import _rest_adapter_call_tool
+    await _rest_adapter_call_tool("api", "get_item", {"item_id": "hello world/foo"})
+
+    call_args = mock_client.request.call_args
+    url = call_args[0][1]  # second positional arg is the URL
+    assert "hello%20world" in url
+    assert "{item_id}" not in url

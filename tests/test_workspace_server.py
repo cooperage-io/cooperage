@@ -144,6 +144,15 @@ def test_delete_traversal_blocked(workspace_dir):
         ws.workspace_delete("../../etc/passwd")
 
 
+def test_safe_path_rejects_symlink(workspace_dir):
+    """Symlinks inside the workspace pointing outside must be rejected."""
+    ws = _server()
+    link = workspace_dir / "sneaky_link"
+    link.symlink_to("/etc/passwd")
+    with pytest.raises(ValueError, match="symlink"):
+        ws._safe_path("sneaky_link")
+
+
 # ── workspace_write_binary ──────────────────────────────────────────────────
 
 

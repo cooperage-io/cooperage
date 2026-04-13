@@ -73,3 +73,44 @@ def test_registry_persists_as_valid_json(tmp_path, monkeypatch):
     _reg().register(ServerDef(name="sim", image="sim:latest", env={"KEY": "val"}))
     data = json.loads(path.read_text())
     assert data[0]["env"] == {"KEY": "val"}
+
+
+# ── Malformed registry.json ────────────────────────────────────────────────
+
+
+def test_load_returns_empty_on_invalid_json(tmp_path, monkeypatch):
+    """Invalid JSON in registry.json should return an empty list, not crash."""
+    from cooperage.core import config
+    path = tmp_path / "registry.json"
+    path.write_text("{not valid json!!!")
+    monkeypatch.setattr(config.settings, "registry_path", path)
+    assert _reg().load() == []
+
+
+def test_load_skips_entries_missing_required_fields(tmp_path, monkeypatch):
+    """Entries missing the 'name' field should be skipped."""
+    from cooperage.core import config
+    path = tmp_path / "registry.json"
+    path.write_text(json.dumps([
+        {"image": "no-name:latest"},  # missing 'name'
+        {"name": "valid", "image": "valid:latest"},
+    ]))
+    monkeypatch.setattr(config.settings, "registry_path", path)
+    servers = _reg().load()
+    assert len(servers) == 1
+    assert servers[0].name == "valid"
+
+
+def test_get_returns_none_for_malformed_entry(tmp_path, monkeypatch):
+    """get() should return None when the matching entry fails validation."""
+    from cooperage.core import config
+    path = tmp_path / "registry.json"
+    # Entry has name but missing other things that might cause issues - actually
+    # ServerDef is lenient, so we need an entry where name matches but something
+    # else is broken. Use an invalid type for a field.
+    path.write_text(json.dumps([
+        {"name": "broken", "port": "not-an-int"},
+    ]))
+    monkeypatch.setattr(config.settings, "registry_path", path)
+    result = _reg().get("broken")
+    assert result is None
