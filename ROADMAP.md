@@ -17,6 +17,7 @@
 - [x] `cooperage_get_container_logs` — LLM can view container stdout/stderr with configurable tail
 - [x] Universal adapter — `cooperage register --from config.yaml` wraps REST APIs inline (no container) and LangChain tools (adapter container)
 - [x] Available servers shown in `create_session` response so LLM knows what's available immediately
+- [x] Async jobs — `cooperage_submit_job` for background execution, `cooperage_job_status/result/cancel`, `cooperage_stop_container` for hard kill, UI jobs panel
 
 ### Auth (extracted to [cooperage-enterprise](https://github.com/cooperage-io/cooperage-enterprise))
 - [x] API key auth with per-entry validation and zero-key warnings
@@ -43,7 +44,7 @@
 - [x] REST adapter path parameter sanitization (URL encoding)
 - [x] Graceful degradation on corrupted registry.json or sessions.json
 - [x] Container readiness check via JSON-RPC POST (rejects non-MCP servers)
-- [x] 203 unit tests (core) + 32 (enterprise) + cloud integration suite
+- [x] 230 unit tests (core) + 35 (enterprise) + cloud integration suite
 - [x] Comprehensive security audit with 30 issues tracked, 18 fixed, 7 accepted with documentation
 
 ### Developer Experience
@@ -51,7 +52,8 @@
 - [x] Image preview — binary files base64-encoded, rendered in browser
 - [x] `simulator` + `analysis` example servers
 - [x] MIT license, cooperage-io GitHub org
-- [x] Helm chart — gateway Deployment + ServiceAccount + Role + ConfigMap + Ingress + UI sidecar
+- [x] Helm chart — gateway Deployment + ServiceAccount + Role + ConfigMap + Ingress + UI sidecar, with `env`/`extraVolumes`/`extraVolumeMounts` for enterprise
+- [x] Enterprise K8s deployment guide — step-by-step: image build, API keys secret, Helm values, OIDC, monitoring
 - [x] `/health` endpoint — K8s liveness/readiness probes
 - [x] Persistent gateway state — PVC for sessions.json + registry.json
 - [x] Image registry prefix — `COOPERAGE_IMAGE_REGISTRY_PREFIX` for air-gapped clusters
@@ -62,37 +64,19 @@
 
 ## Up Next
 
-### 1. Async jobs (branch ready: `feat/async-jobs`)
-Long-running tool calls as background jobs. Submit → poll → retrieve results.
-- `cooperage_submit_job` — returns job_id immediately
-- `cooperage_job_status` / `cooperage_job_result` — poll and retrieve
-- `cooperage_cancel_job` — soft cancel with cooperative flag to workspace
-- `cooperage_stop_container` — hard kill for runaway processes
-- Background keepalive prevents idle cleanup during long jobs
-- Jobs marked LOST on gateway restart
-- UI jobs panel with status and cancel buttons
-- 17 unit tests, ready to merge
-
-### 2. `cooperage deploy` CLI
-One command to provision and deploy the full stack to a fresh server.
-- `cooperage deploy droplet` — DigitalOcean droplet with Docker, gateway, UI
-- `cooperage deploy k8s` — Helm install to existing cluster
-- Handles image building, registry push, env var configuration
-- Replaces the manual SSH + docker build workflow
-
-### 3. Audit log rotation
+### 1. Audit log rotation
 Cap audit log file size and rotate compressed backups.
 - Use Python `RotatingFileHandler` pattern in `FileAuditSink`
 - Configurable max size and backup count via env vars
 - Prevents disk-full silent event loss (audit issue #30)
 
-### 4. Server search / lazy listing
+### 2. Server search / lazy listing
 For deployments with many registered servers (enterprise with 50+ tools):
 - `cooperage_search_servers` tool — accepts a query, returns matching servers by name/description
 - `cooperage_list_servers` returns names only by default, descriptions opt-in via flag
 - Prevents flooding the LLM context window with tool descriptions
 
-### 5. `cooperage.io` landing page
+### 3. `cooperage.io` landing page
 - Simple page with positioning, demo video, install instructions
 - Live demo link to the droplet UI
 - Domain already purchased
