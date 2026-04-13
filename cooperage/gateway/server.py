@@ -252,15 +252,9 @@ async def pull_server(server_name: str, **kwargs) -> dict:
 async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -> dict:
     from cooperage.core.config import settings as _settings
 
-    if auth.max_sessions is not None:
-        current = sessions.count_sessions_for_tenant(auth.tenant_id)
-        if current >= auth.max_sessions:
-            raise PermissionError(
-                f"Tenant {auth.tenant_id!r} has {current} active sessions "
-                f"(limit: {auth.max_sessions}). End existing sessions to free capacity."
-            )
-
-    session = sessions.create_session(name=name, tenant_id=auth.tenant_id)
+    session = sessions.create_session(
+        name=name, tenant_id=auth.tenant_id, max_sessions=auth.max_sessions,
+    )
     
     curr_event = AuditEvent(
         event_type=AuditEventType.SESSION_CREATE,
@@ -280,7 +274,10 @@ async def create_session(auth: AuthContext, name: str | None = None, **kwargs) -
         tasks.append(task)
     _warmup_tasks[session.id] = tasks
     # List available servers for this tenant so the LLM knows what's available
-    available = list_servers(auth=auth)
+    try:
+        available = list_servers(auth=auth)
+    except Exception:
+        available = []
 
     lines = [
         f"Session created. session_id: {session.id}",
@@ -769,6 +766,8 @@ def _is_rest_adapter(server_name: str) -> bool:
 def _rest_adapter_list_tools(server_name: str) -> list[dict]:
     """Return tool definitions from an inline REST adapter config."""
     server_def = registry.get(server_name)
+    if server_def is None or server_def.adapter_config is None:
+        raise ServerNotFoundError(f"No REST adapter config for {server_name!r}")
     config = server_def.adapter_config
     tools = config.get("tools", [])
     result = []
@@ -797,6 +796,8 @@ async def _rest_adapter_call_tool(server_name: str, tool_name: str, arguments: d
     import re
 
     server_def = registry.get(server_name)
+    if server_def is None or server_def.adapter_config is None:
+        raise ServerNotFoundError(f"No REST adapter config for {server_name!r}")
     config = server_def.adapter_config
     base_url = config.get("base_url", "").rstrip("/")
     auth = config.get("auth", {})
@@ -851,7 +852,8 @@ async def _rest_adapter_call_tool(server_name: str, tool_name: str, arguments: d
         if location is None:
             location = "query" if method in ("GET", "DELETE") else "body"
         if location == "path":
-            url = url.replace(f"{{{pname}}}", str(value))
+            from urllib.parse import quote
+            url = url.replace(f"{{{pname}}}", quote(str(value), safe=""))
         elif location == "query":
             query[pname] = value
         elif location == "body":

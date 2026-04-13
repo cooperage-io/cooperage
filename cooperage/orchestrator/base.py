@@ -52,7 +52,11 @@ class Orchestrator(ABC):
         url = f"{info.mcp_url}/mcp"
         while time.monotonic() < deadline:
             try:
-                resp = httpx.get(url, timeout=1.0)
+                resp = httpx.post(
+                    url, json={"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}},
+                    headers={"Content-Type": "application/json"},
+                    timeout=1.0,
+                )
                 if resp.status_code < 500:
                     return True
             except (httpx.RequestError, httpx.HTTPStatusError):

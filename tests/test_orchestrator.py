@@ -160,7 +160,7 @@ def test_stop_container_ignores_not_found():
 # ── wait_until_ready ──────────────────────────────────────────────────────────
 
 @patch("cooperage.orchestrator.base.time.sleep")
-@patch("cooperage.orchestrator.base.httpx.get")
+@patch("cooperage.orchestrator.base.httpx.post")
 def test_wait_until_ready_succeeds(mock_get, _mock_sleep):
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -174,7 +174,7 @@ def test_wait_until_ready_succeeds(mock_get, _mock_sleep):
 
 @patch("cooperage.orchestrator.base.time.monotonic", side_effect=[0, 1, 2, 3, 4, 5, 6])
 @patch("cooperage.orchestrator.base.time.sleep")
-@patch("cooperage.orchestrator.base.httpx.get")
+@patch("cooperage.orchestrator.base.httpx.post")
 def test_wait_until_ready_times_out(mock_get, _mock_sleep, _mock_mono):
     import httpx
     mock_get.side_effect = httpx.RequestError("refused")

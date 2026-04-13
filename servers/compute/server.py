@@ -43,8 +43,8 @@ def run_script(script: str) -> str:
     except Exception:
         stderr_buf.write(traceback.format_exc())
 
-    out = stdout_buf.getvalue()
-    err = stderr_buf.getvalue()
+    out = _cap(stdout_buf.getvalue())
+    err = _cap(stderr_buf.getvalue())
     parts = []
     if out:
         parts.append(f"stdout:\n{out}")
@@ -53,21 +53,36 @@ def run_script(script: str) -> str:
     return "\n".join(parts) if parts else "(no output)"
 
 
+_MAX_OUTPUT = 1_000_000  # 1MB cap per stream to prevent OOM
+_BASH_TIMEOUT = 300  # 5 minutes
+
+
+def _cap(text: str) -> str:
+    if len(text) > _MAX_OUTPUT:
+        return text[:_MAX_OUTPUT] + f"\n...[truncated at {_MAX_OUTPUT} chars]"
+    return text
+
+
 @mcp.tool()
 def run_bash(script: str) -> str:
     """Execute a bash script in the compute container. The /workspace directory
-    is available at $WORKSPACE. stdout and stderr are captured and returned."""
-    result = subprocess.run(
-        ["bash", "-c", script],
-        capture_output=True,
-        text=True,
-        env={**os.environ, "WORKSPACE": str(WORKSPACE)},
-    )
+    is available at $WORKSPACE. stdout and stderr are captured and returned.
+    Scripts are killed after 5 minutes."""
+    try:
+        result = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=_BASH_TIMEOUT,
+            env={**os.environ, "WORKSPACE": str(WORKSPACE)},
+        )
+    except subprocess.TimeoutExpired:
+        return f"error: script timed out after {_BASH_TIMEOUT} seconds"
     parts = []
     if result.stdout:
-        parts.append(f"stdout:\n{result.stdout}")
+        parts.append(f"stdout:\n{_cap(result.stdout)}")
     if result.stderr:
-        parts.append(f"stderr:\n{result.stderr}")
+        parts.append(f"stderr:\n{_cap(result.stderr)}")
     if result.returncode != 0:
         parts.append(f"exit code: {result.returncode}")
     return "\n".join(parts) if parts else "(no output)"

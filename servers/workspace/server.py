@@ -33,8 +33,11 @@ _BINARY_EXTENSIONS = {
 
 
 def _safe_path(filename: str) -> Path:
-    """Resolve path and guard against traversal attacks."""
-    resolved = (WORKSPACE / filename).resolve()
+    """Resolve path and guard against traversal and symlink attacks."""
+    raw = WORKSPACE / filename
+    if raw.is_symlink():
+        raise ValueError(f"Path {filename!r} is a symlink (not allowed)")
+    resolved = raw.resolve()
     if not str(resolved).startswith(str(WORKSPACE.resolve())):
         raise ValueError(f"Path {filename!r} escapes workspace")
     return resolved

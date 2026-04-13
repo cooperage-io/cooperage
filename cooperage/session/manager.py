@@ -41,16 +41,20 @@ def _atomic_write(path: Path, data: str) -> None:
 
 
 def _save() -> None:
-    """Persist sessions to disk. Caller must hold _lock."""
-    data = []
-    for session in _sessions.values():
-        entry = session.model_dump(mode="json")
-        entry["_containers"] = {
-            name: info.model_dump()
-            for name, info in _containers.get(session.id, {}).items()
-        }
-        data.append(entry)
-    _atomic_write(_sessions_path(), json.dumps(data, indent=2, default=str))
+    """Persist sessions to disk. Caller must hold _lock.
+    Errors are logged but not raised — in-memory state is authoritative."""
+    try:
+        data = []
+        for session in _sessions.values():
+            entry = session.model_dump(mode="json")
+            entry["_containers"] = {
+                name: info.model_dump()
+                for name, info in _containers.get(session.id, {}).items()
+            }
+            data.append(entry)
+        _atomic_write(_sessions_path(), json.dumps(data, indent=2, default=str))
+    except Exception as e:
+        logger.error("Failed to persist sessions to disk: %s", e)
 
 
 def _load_from_file() -> None:
@@ -84,7 +88,11 @@ def _parse_file_entry(entry: dict) -> tuple[Session, dict[str, ContainerInfo]]:
 
 # ── Session lifecycle ─────────────────────────────────────────────────────────
 
-def create_session(name: str | None = None, tenant_id: str = "default") -> Session:
+def create_session(
+    name: str | None = None,
+    tenant_id: str = "default",
+    max_sessions: int | None = None,
+) -> Session:
     orch = get_orchestrator()
     session = Session(
         name=name,
@@ -94,6 +102,20 @@ def create_session(name: str | None = None, tenant_id: str = "default") -> Sessi
     orch.create_volume(session.volume_name)
     orch.create_session_network(session)
     with _lock:
+        # Atomic quota check under lock
+        if max_sessions is not None:
+            now = datetime.now(timezone.utc)
+            current = len([
+                s for s in _sessions.values()
+                if s.tenant_id == tenant_id and s.expires_at > now
+            ])
+            if current >= max_sessions:
+                # Clean up the volume/network we just created
+                orch.remove_volume(session.volume_name)
+                raise PermissionError(
+                    f"Tenant {tenant_id!r} has {current} active sessions "
+                    f"(limit: {max_sessions}). End existing sessions to free capacity."
+                )
         _sessions[session.id] = session
         _containers[session.id] = {}
         _save()
@@ -219,7 +241,7 @@ def get_or_start_container(session_id: str, server_def: ServerDef) -> ContainerI
     # while still preventing two threads from starting the same container.
 
     with _lock:
-        existing = _containers[session_id].get(server_def.name)
+        existing = _containers.get(session_id, {}).get(server_def.name)
         if existing is not None:
             return existing
         if start_key not in _start_locks:
@@ -227,27 +249,33 @@ def get_or_start_container(session_id: str, server_def: ServerDef) -> ContainerI
         start_lock = _start_locks[start_key]
 
     with start_lock:
-        with _lock:
-            existing = _containers[session_id].get(server_def.name)
-        if existing is not None:
-            return existing
+        try:
+            with _lock:
+                existing = _containers.get(session_id, {}).get(server_def.name)
+            if existing is not None:
+                return existing
 
-        info = orch.start_container(server_def, session)
-        ready = orch.wait_until_ready(info)
-        if not ready:
-            logs = orch.get_container_logs(info.container_id)
-            orch.stop_container(info.container_id)
-            raise ContainerStartupError(
-                f"Container for server {server_def.name!r} failed to start "
-                f"within {settings.container_startup_timeout}s.",
-                logs=logs,
-            )
+            # Session may have been deleted while we waited for the lock
+            if get_session(session_id) is None:
+                raise SessionNotFoundError(f"Session {session_id!r} was deleted during container startup")
 
-        with _lock:
-            if session_id in _sessions:
-                _sessions[session_id].containers[server_def.name] = info.container_id
-                _containers[session_id][server_def.name] = info
-                _save()
+            info = orch.start_container(server_def, session)
+            ready = orch.wait_until_ready(info)
+            if not ready:
+                logs = orch.get_container_logs(info.container_id)
+                orch.stop_container(info.container_id)
+                raise ContainerStartupError(
+                    f"Container for server {server_def.name!r} failed to start "
+                    f"within {settings.container_startup_timeout}s.",
+                    logs=logs,
+                )
+
+            with _lock:
+                if session_id in _sessions:
+                    _sessions[session_id].containers[server_def.name] = info.container_id
+                    _containers.setdefault(session_id, {})[server_def.name] = info
+                    _save()
+        finally:
             _start_locks.pop(start_key, None)
 
     return info

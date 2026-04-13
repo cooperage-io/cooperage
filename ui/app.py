@@ -272,8 +272,20 @@ def _render_preview(session_id: str, selected_file: str) -> None:
                     )
                 else:
                     st.caption(f"Cannot preview .{ext} files")
-            elif ext in ("html", "htm", "svg"):
-                components.html(content, height=480, scrolling=True)
+            elif ext in ("html", "htm"):
+                # Sandboxed iframe — renders HTML layout but blocks script execution
+                import html as _html
+                escaped = _html.escape(content)
+                components.html(
+                    f'<iframe srcdoc="{escaped}" sandbox="allow-same-origin" '
+                    f'style="width:100%;height:480px;border:none;"></iframe>',
+                    height=490, scrolling=False,
+                )
+            elif ext == "svg":
+                # Render SVG as image to prevent script injection
+                import base64 as _b64svg
+                svg_b64 = _b64svg.b64encode(content.encode()).decode()
+                st.image(f"data:image/svg+xml;base64,{svg_b64}")
             elif ext in ("csv", "tsv"):
                 sep = "\t" if ext == "tsv" else ","
                 try:
@@ -414,8 +426,11 @@ def main_content() -> None:
 
     # ── Session expiry control ───────────────────────────────────────────────
     now = datetime.now(timezone.utc)
-    expires_at = datetime.fromisoformat(session.get("expires_at", now.isoformat()))
-    created_at = datetime.fromisoformat(session.get("created_at", now.isoformat()))
+    def _parse_dt(s: str) -> datetime:
+        dt = datetime.fromisoformat(s)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    expires_at = _parse_dt(session.get("expires_at", now.isoformat()))
+    created_at = _parse_dt(session.get("created_at", now.isoformat()))
     max_expiry = created_at + timedelta(hours=72)
     remaining = expires_at - now
 
