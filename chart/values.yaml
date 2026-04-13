@@ -69,8 +69,26 @@ persistence:
 # -- Network isolation (NetworkPolicy per session)
 networkIsolation: true
 
-# -- Authentication (provided by cooperage-enterprise package)
-# See: https://github.com/cooperage-io/cooperage-enterprise
+# -- Extra environment variables (for enterprise auth, etc.)
+# env:
+#   COOPERAGE_AUTH_ENABLED: "true"
+#   COOPERAGE_API_KEYS_PATH: /etc/cooperage/api-keys.json
+#   COOPERAGE_AUDIT_LOG_PATH: /var/log/cooperage/audit.jsonl
+env: {}
+
+# -- Extra volumes (for mounting secrets, config files, etc.)
+# extraVolumes:
+#   - name: api-keys
+#     secret:
+#       secretName: cooperage-api-keys
+extraVolumes: []
+
+# -- Extra volume mounts
+# extraVolumeMounts:
+#   - name: api-keys
+#     mountPath: /etc/cooperage
+#     readOnly: true
+extraVolumeMounts: []
 
 # -- UI sidecar (Streamlit workspace viewer)
 ui:

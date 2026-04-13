@@ -32,10 +32,20 @@ spec:
           envFrom:
             - configMapRef:
                 name: cooperage-gateway
-          {{- if .Values.persistence.enabled }}
+          {{- if .Values.env }}
+          env:
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
           volumeMounts:
+          {{- if .Values.persistence.enabled }}
             - name: data
               mountPath: /data/cooperage
+          {{- end }}
+          {{- if .Values.extraVolumeMounts }}
+            {{- toYaml .Values.extraVolumeMounts | nindent 12 }}
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
@@ -51,9 +61,12 @@ spec:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 30
-      {{- if .Values.persistence.enabled }}
       volumes:
+      {{- if .Values.persistence.enabled }}
         - name: data
           persistentVolumeClaim:
             claimName: cooperage-gateway-data
+      {{- end }}
+      {{- if .Values.extraVolumes }}
+        {{- toYaml .Values.extraVolumes | nindent 8 }}
       {{- end }}
