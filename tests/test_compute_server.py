@@ -2,7 +2,6 @@
 Compute server tests — run_script and run_bash execution, output capping, timeouts.
 """
 
-import os
 import subprocess
 from unittest.mock import patch
 

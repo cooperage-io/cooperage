@@ -20,6 +20,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp import types
 
+import cooperage.job.manager as job_manager
 import cooperage.registry.registry as registry
 import cooperage.session.manager as sessions
 from cooperage.orchestrator import get_orchestrator
@@ -30,7 +31,7 @@ from cooperage.core.errors import (
     CooperageError, ContainerConnectionError,
     ServerNotFoundError, SessionNotFoundError, ToolExecutionError,
 )
-from cooperage.core.models import ContainerInfo, ServerDef
+from cooperage.core.models import ContainerInfo, Job, JobStatus, ServerDef
 
 logger = logging.getLogger(__name__)
 
@@ -406,6 +407,7 @@ async def call_tool_proxy(session_id: str, server_name: str, tool_name: str, arg
     requires_session=True,
 )
 async def end_session(session_id: str, **kwargs) -> dict:
+    job_manager.cancel_session_jobs(session_id)
     for task in _warmup_tasks.pop(session_id, []):
         task.cancel()
     _warming.pop(session_id, None)
@@ -439,6 +441,153 @@ async def set_session_expiry(session_id: str, expires_at: str, **kwargs) -> dict
         new_expiry = new_expiry.replace(tzinfo=timezone.utc)
     actual = sessions.set_session_expiry(session_id, new_expiry)
     return {"session_id": session_id, "expires_at": actual.isoformat()}
+
+
+# ── Async job tools ──────────────────────────────────────────────────────────
+
+
+@tool(
+    "cooperage_submit_job",
+    description=(
+        "Submit a long-running tool call as a background job. Returns immediately "
+        "with a job_id. Use cooperage_job_status to poll for completion, then "
+        "cooperage_job_result to retrieve the output. Use this for any tool call "
+        "expected to take more than a minute (simulations, data processing, training)."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "server_name": {"type": "string"},
+        "tool_name": {"type": "string"},
+        "arguments": {"type": "object", "description": "Arguments to pass to the tool"},
+    },
+    required=["session_id", "server_name", "tool_name"],
+    requires_session=True,
+    requires_server=True,
+)
+async def submit_job(
+    auth: AuthContext,
+    session_id: str,
+    server_name: str,
+    tool_name: str,
+    arguments: dict | None = None,
+    **kwargs,
+) -> dict:
+    from cooperage.core.config import settings as _settings
+    job = job_manager.create_job(
+        session_id=session_id,
+        tenant_id=auth.tenant_id,
+        server_name=server_name,
+        tool_name=tool_name,
+        arguments=arguments or {},
+    )
+    timeout = _settings.job_default_timeout
+    task = asyncio.create_task(_run_job(job, timeout))
+    job_manager.register_task(job.id, task)
+    return {"job_id": job.id, "status": job.status.value}
+
+
+@tool(
+    "cooperage_job_status",
+    description=(
+        "Check the status of one or all async jobs in a session. "
+        "If job_id is provided, returns that job's status. "
+        "Otherwise returns all jobs for the session."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "job_id": {"type": "string", "description": "Optional — omit to list all jobs"},
+    },
+    required=["session_id"],
+    requires_session=True,
+)
+async def job_status(session_id: str, job_id: str | None = None, **kwargs) -> dict | list:
+    if job_id:
+        job = job_manager.get_job(job_id)
+        if job is None or job.session_id != session_id:
+            raise SessionNotFoundError(f"Job {job_id!r} not found in session {session_id[:8]}")
+        return job.model_dump(mode="json", exclude={"arguments"})
+    return [j.model_dump(mode="json", exclude={"arguments"}) for j in job_manager.list_jobs(session_id=session_id)]
+
+
+@tool(
+    "cooperage_job_result",
+    description=(
+        "Retrieve the result of a completed async job. "
+        "Returns the tool output that was written to the workspace."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "job_id": {"type": "string"},
+    },
+    required=["session_id", "job_id"],
+    requires_session=True,
+)
+async def job_result(session_id: str, job_id: str, **kwargs) -> dict | str:
+    job = job_manager.get_job(job_id)
+    if job is None or job.session_id != session_id:
+        raise SessionNotFoundError(f"Job {job_id!r} not found in session {session_id[:8]}")
+    if job.status != JobStatus.COMPLETED:
+        return {"error": True, "status": job.status.value, "message": f"Job is {job.status.value}, not completed"}
+    if job.result_path:
+        return await _workspace_op(session_id, "workspace_read", {"path": job.result_path})
+    return {"error": True, "message": "Job completed but no result path recorded"}
+
+
+@tool(
+    "cooperage_cancel_job",
+    description=(
+        "Soft-cancel a running job. Writes a cancel flag to the workspace and "
+        "closes the connection. Tools that support cooperative cancellation will "
+        "check for this flag and exit cleanly. Server state is preserved. "
+        "If the job doesn't stop, use cooperage_stop_container as a hard kill."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "job_id": {"type": "string"},
+    },
+    required=["session_id", "job_id"],
+    requires_session=True,
+)
+async def cancel_job(session_id: str, job_id: str, **kwargs) -> dict:
+    job = job_manager.get_job(job_id)
+    if job is None or job.session_id != session_id:
+        raise SessionNotFoundError(f"Job {job_id!r} not found in session {session_id[:8]}")
+    if job.status not in (JobStatus.RUNNING, JobStatus.PENDING):
+        return {"error": True, "message": f"Job is {job.status.value}, cannot cancel"}
+    job_manager.cancel_job(job_id)
+    return {"job_id": job_id, "status": "cancelled"}
+
+
+@tool(
+    "cooperage_stop_container",
+    description=(
+        "Hard-kill a specific container in a session. Use this when a soft cancel "
+        "didn't work and you need to forcefully stop a runaway process. "
+        "All server state in the container is lost. The container will be "
+        "re-created automatically on the next tool call to that server."
+    ),
+    params={
+        "session_id": {"type": "string"},
+        "server_name": {"type": "string"},
+    },
+    required=["session_id", "server_name"],
+    requires_session=True,
+)
+async def stop_container(session_id: str, server_name: str, **kwargs) -> dict:
+    container = sessions.get_container(session_id, server_name)
+    if container is None:
+        return {"error": True, "message": f"No running container for {server_name!r}"}
+    orch = get_orchestrator()
+    orch.stop_container(container)
+    sessions.remove_container(session_id, server_name)
+    audit.emit(AuditEvent(
+        event_type=AuditEventType.CONTAINER_STOP,
+        session_id=session_id,
+        tenant_id=_auth_ctx.get().tenant_id,
+        server_name=server_name,
+        metadata={"container_id": container.container_id, "reason": "user_stop"},
+    ))
+    return {"stopped": server_name, "session_id": session_id}
 
 
 @tool(
@@ -941,6 +1090,113 @@ async def _proxy_call_tool(
     return result
 
 
+async def _proxy_call_tool_long(
+    session_id: str,
+    server_name: str,
+    tool_name: str,
+    arguments: dict,
+    timeout: float,
+) -> Any:
+    """Like _proxy_call_tool but with a dedicated client and configurable timeout."""
+    info = await _ensure_container(session_id, server_name)
+    payload = {
+        "jsonrpc": "2.0",
+        "id": next(_rpc_id_counter),
+        "method": "tools/call",
+        "params": {"name": tool_name, "arguments": arguments},
+    }
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=30, read=timeout),
+    ) as client:
+        resp = await client.post(f"{info.mcp_url}/mcp", json=payload, headers=_MCP_HEADERS)
+        resp.raise_for_status()
+
+    data = resp.json()
+    if "error" in data:
+        raise ToolExecutionError(
+            data["error"].get("message", str(data["error"])),
+            suggestion=f"Check the arguments for tool '{tool_name}' and try again.",
+        )
+    result = data.get("result", {})
+    content = result.get("content", [])
+    if content:
+        texts = [c.get("text", "") for c in content if c.get("type") == "text"]
+        return "\n".join(texts) if texts else result
+    structured = result.get("structuredContent", {}).get("result")
+    if structured is not None:
+        return json.dumps(structured)
+    return result
+
+
+# ── Async job execution ──────────────────────────────────────────────────────
+
+
+async def _job_keepalive(session_id: str, server_name: str):
+    """Touch container and session every 60s to prevent idle cleanup during long jobs."""
+    while True:
+        await asyncio.sleep(60)
+        sessions.touch_container(session_id, server_name)
+        sessions.touch_session(session_id)
+
+
+async def _run_job(job: Job, timeout: float) -> None:
+    """Background coroutine that executes a job and persists the result."""
+    job_manager.update_job(job.id, JobStatus.RUNNING)
+    audit.emit(AuditEvent(
+        event_type=AuditEventType.JOB_START,
+        session_id=job.session_id,
+        tenant_id=job.tenant_id,
+        tool_name=job.tool_name,
+        metadata={"job_id": job.id},
+    ))
+
+    keepalive = asyncio.create_task(_job_keepalive(job.session_id, job.server_name))
+    try:
+        result = await _proxy_call_tool_long(
+            job.session_id, job.server_name, job.tool_name,
+            job.arguments, timeout,
+        )
+        result_path = f".jobs/{job.id}.json"
+        result_text = result if isinstance(result, str) else json.dumps(result)
+        await _workspace_op(job.session_id, "workspace_write", {
+            "path": result_path, "content": result_text,
+        })
+        job_manager.update_job(job.id, JobStatus.COMPLETED, result_path=result_path)
+        audit.emit(AuditEvent(
+            event_type=AuditEventType.JOB_COMPLETE,
+            session_id=job.session_id,
+            tenant_id=job.tenant_id,
+            tool_name=job.tool_name,
+            metadata={"job_id": job.id, "result_path": result_path},
+        ))
+    except asyncio.CancelledError:
+        # Write cancel flag for cooperative cancellation
+        try:
+            await _workspace_op(job.session_id, "workspace_write", {
+                "path": f".jobs/{job.id}.cancel", "content": "cancelled",
+            })
+        except Exception:
+            pass
+        job_manager.update_job(job.id, JobStatus.CANCELLED)
+        audit.emit(AuditEvent(
+            event_type=AuditEventType.JOB_CANCEL,
+            session_id=job.session_id,
+            tenant_id=job.tenant_id,
+            metadata={"job_id": job.id},
+        ))
+    except Exception as e:
+        job_manager.update_job(job.id, JobStatus.FAILED, error=str(e))
+        audit.emit(AuditEvent(
+            event_type=AuditEventType.JOB_FAIL,
+            session_id=job.session_id,
+            tenant_id=job.tenant_id,
+            metadata={"job_id": job.id, "error": str(e)},
+        ))
+    finally:
+        keepalive.cancel()
+        job_manager.unregister_task(job.id)
+
+
 # ── Container logs endpoint ────────────────────────────────────────────────────
 
 async def _handle_logs(scope, receive, send) -> None:
@@ -1101,6 +1357,8 @@ def _init_gateway() -> None:
     audit.init()
     _ensure_builtins_registered()
     start_cleanup_thread()
+    job_manager._load_from_file()
+    job_manager.mark_lost_jobs()
 
 
 async def _shutdown_http_client() -> None:

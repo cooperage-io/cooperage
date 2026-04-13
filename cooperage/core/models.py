@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, SecretStr
@@ -58,3 +59,30 @@ class Session(BaseModel):
             self.volume_name = f"cooperage-session-{self.id}"
         if not self.network_name:
             self.network_name = f"cooperage-net-{self.id[:12]}"
+
+
+# ── Async Jobs ───────────────────────────────────────────────────────────────
+
+
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    LOST = "lost"  # gateway restarted while job was running
+
+
+class Job(BaseModel):
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    session_id: str
+    tenant_id: str = "default"
+    server_name: str
+    tool_name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    status: JobStatus = JobStatus.PENDING
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    result_path: str | None = None  # workspace path where result is stored
+    error: str | None = None

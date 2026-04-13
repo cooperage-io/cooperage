@@ -286,6 +286,17 @@ def get_container(session_id: str, server_name: str) -> ContainerInfo | None:
         return _containers.get(session_id, {}).get(server_name)
 
 
+def remove_container(session_id: str, server_name: str) -> None:
+    """Remove a container from tracking (after manual stop)."""
+    with _lock:
+        containers = _containers.get(session_id, {})
+        containers.pop(server_name, None)
+        session = _sessions.get(session_id)
+        if session:
+            session.containers.pop(server_name, None)
+        _save()
+
+
 # ── Activity tracking ─────────────────────────────────────────────────────────
 
 def touch_container(session_id: str, server_name: str) -> None:
