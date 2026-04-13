@@ -381,8 +381,11 @@ def _cleanup_loop() -> None:
     import time
     while True:
         time.sleep(settings.session_cleanup_interval)
-        reap_expired_sessions()
-        _cleanup_idle_containers()
+        try:
+            reap_expired_sessions()
+            _cleanup_idle_containers()
+        except Exception as e:
+            logger.error("Cleanup thread error (will retry): %s", e)
 
 
 def start_cleanup_thread() -> None:

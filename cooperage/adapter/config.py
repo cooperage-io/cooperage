@@ -7,7 +7,7 @@ as Cooperage servers.
 
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AdapterType(str, Enum):
@@ -67,3 +67,13 @@ class AdapterConfig(BaseModel):
     langchain_tools: list[str] = Field(default_factory=list)  # tool names to expose (empty = all)
 
     model_config = {"populate_by_name": True}
+
+    @model_validator(mode="after")
+    def _validate_type_fields(self):
+        if self.type == AdapterType.REST_API:
+            if not self.base_url:
+                raise ValueError("base_url is required for rest-api adapters")
+        elif self.type == AdapterType.LANGCHAIN:
+            if not self.source:
+                raise ValueError("source is required for langchain adapters")
+        return self
