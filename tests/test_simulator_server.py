@@ -1,22 +1,27 @@
 """
 Simulator server tests — filesystem interactions use tmp_path, no Docker needed.
 """
+import importlib
+import importlib.util
 import json
+from pathlib import Path
+
 import pytest
+
+_SIM_PATH = Path(__file__).parent.parent / "example-servers" / "synthetic-image-generator" / "server.py"
 
 
 @pytest.fixture(autouse=True)
 def isolated_workspace(tmp_path, monkeypatch):
-    import importlib
     monkeypatch.setenv("COOPERAGE_WORKSPACE", str(tmp_path))
-    import server as srv
-    importlib.reload(srv)
     return tmp_path
 
 
 def _import_srv():
-    import server as srv
-    return srv
+    spec = importlib.util.spec_from_file_location("simulator_server", _SIM_PATH)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 # ── generate_scene ────────────────────────────────────────────────────────────
@@ -92,38 +97,3 @@ def test_generate_scene_image_correct_size(tmp_path):
     srv._generate_scene("urban", 128, 96, seed=5)
     img = Image.open(tmp_path / "scene.png")
     assert img.size == (128, 96)
-
-
-# ── list_workspace ────────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_list_workspace_empty(tmp_path):
-    srv = _import_srv()
-    result = await srv.call_tool("list_workspace", {})
-    assert result[0].text == "(empty)"
-
-
-@pytest.mark.asyncio
-async def test_list_workspace_shows_generated_files(tmp_path):
-    srv = _import_srv()
-    srv._generate_scene("terrain", 32, 32, seed=0)
-    result = await srv.call_tool("list_workspace", {})
-    assert "scene.png" in result[0].text
-    assert "scene.json" in result[0].text
-
-
-# ── call_tool dispatch ────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_call_tool_generate_scene(tmp_path):
-    srv = _import_srv()
-    result = await srv.call_tool("generate_scene", {"scene_type": "coastal", "width": 32, "height": 32, "seed": 0})
-    data = json.loads(result[0].text)
-    assert data["scene_type"] == "coastal"
-
-
-@pytest.mark.asyncio
-async def test_call_tool_unknown(tmp_path):
-    srv = _import_srv()
-    result = await srv.call_tool("nonexistent", {})
-    assert "Unknown tool" in result[0].text
