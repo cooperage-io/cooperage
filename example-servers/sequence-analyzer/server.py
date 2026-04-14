@@ -12,7 +12,6 @@ Tools:
   composition_chart — generate a bar chart of nucleotide/amino acid frequencies
 """
 
-import io
 import json
 import os
 import re

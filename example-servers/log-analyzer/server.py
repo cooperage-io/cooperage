@@ -16,7 +16,7 @@ import json
 import os
 import re
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -174,7 +174,7 @@ def detect_anomalies(
             dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         except (ValueError, AttributeError):
             continue
-        bucket = dt.strftime(f"%Y-%m-%d %H:") + f"{(dt.minute // window_minutes) * window_minutes:02d}"
+        bucket = dt.strftime("%Y-%m-%d %H:") + f"{(dt.minute // window_minutes) * window_minutes:02d}"
         total_buckets[bucket] += 1
         if e.get("level") in ("ERROR", "FATAL", "CRITICAL"):
             error_buckets[bucket] += 1
@@ -222,7 +222,7 @@ def incident_timeline(
     if levels is None:
         levels = ["ERROR", "FATAL", "CRITICAL", "WARN", "WARNING"]
 
-    levels_upper = {l.upper() for l in levels}
+    levels_upper = {lv.upper() for lv in levels}
     timeline = []
 
     for e in events:

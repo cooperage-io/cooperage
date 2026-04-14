@@ -11,7 +11,6 @@ Tools:
   compare_csvs   — compare two CSV files side by side
 """
 
-import io
 import json
 import os
 from pathlib import Path
@@ -19,7 +18,6 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import uvicorn
 from mcp.server.fastmcp import FastMCP

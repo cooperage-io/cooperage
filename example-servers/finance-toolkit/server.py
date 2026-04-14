@@ -12,10 +12,9 @@ Tools:
   risk_report        — generate a risk summary with VaR and drawdown
 """
 
-import io
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import matplotlib
