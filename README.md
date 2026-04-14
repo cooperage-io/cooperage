@@ -190,11 +190,17 @@ if __name__ == "__main__":
 ```
 
 Example servers:
-- [csv-analyzer](example-servers/csv-analyzer/) — statistics, charts, CSV comparison
-- [web-scraper](example-servers/web-scraper/) — fetch URLs, extract text/tables
-- [pdf-report](example-servers/pdf-report/) — compile workspace files into PDF reports
-- [image-analyzer](example-servers/image-analyzer/) — image analysis with numpy/PIL
-- [synthetic-image-generator](example-servers/synthetic-image-generator/) — generate test imagery
+
+| Server | Industry | Tools |
+|--------|----------|-------|
+| [csv-analyzer](example-servers/csv-analyzer/) | General | Statistics, charts, CSV comparison |
+| [web-scraper](example-servers/web-scraper/) | General | URL text extraction, HTML table → CSV |
+| [pdf-report](example-servers/pdf-report/) | General | Compile workspace files into PDF reports |
+| [sequence-analyzer](example-servers/sequence-analyzer/) | Biotech | FASTA parsing, GC content, motif search, composition charts |
+| [finance-toolkit](example-servers/finance-toolkit/) | Finance | Portfolio analysis, risk metrics, correlation matrix |
+| [log-analyzer](example-servers/log-analyzer/) | DevOps | Log parsing, error grouping, anomaly detection, incident timeline |
+| [image-analyzer](example-servers/image-analyzer/) | Imaging | Image analysis with numpy/PIL |
+| [synthetic-image-generator](example-servers/synthetic-image-generator/) | Imaging | Generate test imagery |
 
 ## Wrapping existing tools
 
