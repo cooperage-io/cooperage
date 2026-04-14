@@ -143,17 +143,29 @@ Bridges your local Claude Desktop to a remote gateway over HTTP.
 This is the core use case. Containers share `/workspace`:
 
 ```
-1. cooperage_call_tool(session, "scene-generator", "generate", {type: "urban"})
-     → writes /workspace/scene.png
+1. cooperage_call_tool(session, "web-scraper", "scrape_table",
+     {url: "https://example.com/data", output: "sales.csv"})
+     → fetches HTML table, saves /workspace/sales.csv
 
-2. cooperage_call_tool(session, "image-analyzer", "analyze", {path: "scene.png"})
-     → reads scene.png, writes /workspace/analysis.json
+2. cooperage_call_tool(session, "csv-analyzer", "analyze_csv", {path: "sales.csv"})
+     → reads sales.csv, returns statistics
 
-3. cooperage_workspace_read(session, "analysis.json")
-     → LLM reads the result
+3. cooperage_call_tool(session, "csv-analyzer", "plot_column",
+     {path: "sales.csv", column: "revenue", chart_type: "bar", output: "chart.png"})
+     → generates /workspace/chart.png
+
+4. cooperage_call_tool(session, "pdf-report", "generate_report", {
+     title: "Sales Analysis",
+     sections: [
+       {heading: "Data", file: "sales.csv"},
+       {heading: "Revenue by Region", file: "chart.png"},
+     ],
+     output: "report.pdf"
+   })
+     → compiles /workspace/report.pdf
 ```
 
-Two containers. One session. One shared volume.
+Three containers. One session. One shared volume. Data flows through files, not context windows.
 
 ## Writing your own server
 
@@ -177,7 +189,12 @@ if __name__ == "__main__":
     uvicorn.run(mcp.streamable_http_app(), host="0.0.0.0", port=8000)
 ```
 
-See full examples in [example-servers/](example-servers/).
+Example servers:
+- [csv-analyzer](example-servers/csv-analyzer/) — statistics, charts, CSV comparison
+- [web-scraper](example-servers/web-scraper/) — fetch URLs, extract text/tables
+- [pdf-report](example-servers/pdf-report/) — compile workspace files into PDF reports
+- [image-analyzer](example-servers/image-analyzer/) — image analysis with numpy/PIL
+- [synthetic-image-generator](example-servers/synthetic-image-generator/) — generate test imagery
 
 ## Wrapping existing tools
 

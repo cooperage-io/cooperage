@@ -1,0 +1,5 @@
+mcp[cli]>=1.0.0
+uvicorn[standard]>=0.30.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+numpy>=1.26.0
