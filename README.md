@@ -6,6 +6,10 @@
 
 Give your AI tools their own compute. Cooperage runs each tool in an isolated container with dedicated resources and a shared workspace — on your infrastructure, under your control.
 
+<p align="center">
+  <img src="assets/cooperage_screenshot.png" alt="Cooperage in action — Web UI session monitor alongside Claude Desktop" width="820">
+</p>
+
 ## The problem
 
 You've got tools. Maybe a simulation engine, an analysis library, a data pipeline. You can call them one at a time, but what happens when your LLM needs to chain them together, pass data between them, and run them on real infrastructure?
