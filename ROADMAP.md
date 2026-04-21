@@ -81,15 +81,21 @@ For deployments with many registered servers (enterprise with 50+ tools):
 - Live demo link to the droplet UI
 - Domain already purchased
 
+- **K8s: RWX PVC workspace** — replace hostPath volumes with ReadWriteMany PVCs (NFS, CephFS, EFS, etc.) for shared `/workspace` storage. hostPath is a security concern on hardened clusters and is likely blocked by Pod Security Standards in defense/enterprise environments. RWX PVCs also remove the pod affinity constraint, allowing session containers to schedule across nodes (critical for GPU workloads on dedicated nodes).
+  - Add `workspace_storage_class` and `workspace_storage_size` to `Settings` / Helm `values.yaml`.
+  - Create a PVC per session instead of relying on hostPath + pod affinity.
+  - Remove the `requiredDuringSchedulingIgnoredDuringExecution` affinity rule when PVC mode is active.
+  - Keep hostPath as a fallback for Docker Desktop / single-node dev clusters.
+
 ---
 
 ## Backlog
 
 ### Infrastructure
 - **GPU support for K8s workloads** — extend `ResourceLimits` with `gpu` field, wire into Pod spec, Docker `--gpus` for local dev, `gpu-compute` example server with PyTorch/CUDA, per-tenant GPU quota enforcement
-- **K8s: RWX PVC workspace** — optional alternative to hostPath + pod affinity for multi-node clusters with RWX StorageClass
 - **K8s: Ingress support** — replace NodePort with Ingress/ClusterIP for production on-prem routing
 - **Fly.io / Railway backend** — simpler cloud alternative to K8s or bare Docker VM
+- **`cooperage deploy` CLI** — thin wrapper to provision cloud infra (droplet or K8s) and deploy the stack
 
 ### Features
 - **Interactive terminal** — web-based terminal (xterm.js) in the Streamlit UI connected to a session's compute container for interactive debugging. Requires a websocket endpoint on the gateway. As a simpler alternative, document SSH/exec access: `docker exec -it cooperage-{session_id[:8]}-__compute__ bash` for local Docker, `kubectl exec` for K8s.
