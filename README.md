@@ -198,7 +198,7 @@ COOPERAGE_ORCHESTRATOR=kubernetes uv run cooperage start
 
 ## Web UI
 
-Cooperage surfaces a dashboard URL at session start — no separate command needed. The dashboard shows active sessions, container logs, and workspace files, with support for file preview (images, HTML, CSV, PDF), file upload, and session expiry controls.
+Real-time dashboard for monitoring sessions, viewing container logs, and browsing workspace files. Supports file upload and download — bring your own data in, pull results out. Cooperage gives the LLM a URL to share with the user when a session starts.
 
 ## Enterprise
 
