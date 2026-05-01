@@ -161,25 +161,7 @@ Three containers. One session. One shared volume. Data flows through files, not 
 
 ## Writing your own server
 
-Any Docker image that serves tools on port 8000 works. Minimal example:
-
-```python
-from mcp.server.fastmcp import FastMCP
-import uvicorn
-
-mcp = FastMCP("my-server", json_response=True, stateless_http=True)
-
-@mcp.tool()
-def my_tool(input_path: str) -> str:
-    """Process a file from /workspace."""
-    data = open(f"/workspace/{input_path}").read()
-    # ... do work ...
-    open("/workspace/result.json", "w").write(result)
-    return "Done. Result at /workspace/result.json"
-
-if __name__ == "__main__":
-    uvicorn.run(mcp.streamable_http_app(), host="0.0.0.0", port=8000)
-```
+Use the [cooperage-sdk](https://github.com/cooperage-io/cooperage-sdk) (`pip install cooperage-sdk`). It handles workspace path resolution, MCP boilerplate, and server startup. You can build a full Docker image for maximum control, or write plain Python functions and skip the Dockerfile entirely — the SDK wraps them automatically.
 
 Example servers:
 
@@ -202,8 +184,6 @@ Don't want to write a Docker image? Use `cooperage register --from` with a YAML 
 |------|-----------------|--------------|
 | `rest-api` | Base URL, auth, tool definitions | HTTP calls proxied to your API (no container) |
 | `langchain` | Python file or pip package with `@tool` functions | Auto-discovered and wrapped |
-
-For plain Python functions, use the SDK's `serve_functions()` — three lines, no YAML needed. See [cooperage-sdk](https://github.com/cooperage-io/cooperage-sdk).
 
 Auth credentials use `${ENV_VAR}` syntax — secrets are passed via `--env`, never stored in config files.
 
