@@ -4,7 +4,7 @@
 
 ---
 
-Give your AI tools their own compute. Cooperage runs each tool in an isolated container with dedicated resources and a shared workspace — on your infrastructure, under your control.
+Cooperage gives an LLM a fully observable sandbox with a registry of AI-ready tools, each running in its own isolated container with dedicated CPU/memory and a shared workspace volume.
 
 <p align="center">
   <img src="assets/cooperage_screenshot.png" alt="Cooperage in action — Web UI session monitor alongside Claude Desktop" width="820">
@@ -12,27 +12,15 @@ Give your AI tools their own compute. Cooperage runs each tool in an isolated co
 
 ## The problem
 
-You've got tools. Maybe a simulation engine, an analysis library, a data pipeline. You can call them one at a time, but what happens when your LLM needs to chain them together, pass data between them, and run them on real infrastructure?
+Most AI tool infrastructure assumes tools are REST APIs. But the tools that actually matter at companies with big systems engineering — simulation engines, data pipelines, sensor processors, analysis libraries — are heavyweight compute systems. They can't be stateless. They can't live behind an HTTP endpoint.
 
-Cooperage is that infrastructure layer. Register your tools, and your LLM orchestrates them across isolated containers that share a workspace volume. Data flows through files, not context windows.
+Cooperage is built for those tools.
+
+Every company with serious systems engineering has institutional knowledge locked inside heavyweight compute tools. Cooperage connects them and lets AI orchestrate that knowledge together. It's infrastructure for the company brain.
 
 ## How it works
 
-```
-LLM (Claude, GPT, etc.)
-       │
-       ▼
-┌─────────────────────────┐
-│    Cooperage Gateway    │  ← one endpoint your LLM talks to
-└────────────┬────────────┘
-             │
-     ┌───────┴───────┐
-     ▼               ▼
-[Container A]   [Container B]     isolated containers,
- your tool        your tool        spun up on demand
-     └───────┬───────┘
-      shared /workspace volume    data persists across calls
-```
+The LLM orchestrates tools across isolated containers. Data flows through a shared `/workspace` volume, not context windows. Each tool gets its own container with dedicated resources, spun up on demand.
 
 **The key idea:** multiple containers per session, one shared `/workspace` volume. A generator writes a file, an analyzer reads it, a report writer summarizes it — all orchestrated by the LLM, all passing data through the same volume.
 
@@ -240,7 +228,7 @@ Supports file preview (images, HTML, CSV, PDF), file upload, and session expiry 
 
 ## Enterprise
 
-[cooperage-enterprise](https://github.com/cooperage-io/cooperage-enterprise) adds:
+[cooperage-enterprise](https://github.com/cooperage-io/cooperage-enterprise) adds auth, multi-tenancy, RBAC, session quotas, and audit logging on top of the open-source core (BSL License).
 
 - **Authentication** — API keys, JWT (HS256), OIDC/SSO (Azure AD, Okta, Auth0)
 - **Multi-tenancy** — per-tenant session isolation and RBAC
@@ -289,4 +277,4 @@ uv run pytest -v
 
 ## License
 
-[MIT](LICENSE)
+Public core: [MIT](LICENSE). Enterprise: BSL License — see [cooperage-enterprise](https://github.com/cooperage-io/cooperage-enterprise).
