@@ -198,13 +198,7 @@ COOPERAGE_ORCHESTRATOR=kubernetes uv run cooperage start
 
 ## Web UI
 
-Real-time dashboard for monitoring sessions, viewing container logs, and browsing workspace files.
-
-```bash
-uv run cooperage ui
-```
-
-Supports file preview (images, HTML, CSV, PDF), file upload, and session expiry controls.
+Cooperage surfaces a dashboard URL at session start — no separate command needed. The dashboard shows active sessions, container logs, and workspace files, with support for file preview (images, HTML, CSV, PDF), file upload, and session expiry controls.
 
 ## Enterprise
 
