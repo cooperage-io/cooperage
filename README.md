@@ -16,7 +16,7 @@ Most AI tool infrastructure assumes tools are REST APIs. But the tools that actu
 
 Cooperage is built for those tools.
 
-Every company with serious systems engineering has institutional knowledge locked inside heavyweight compute tools. Cooperage connects them and lets AI orchestrate that knowledge together. It's infrastructure for the company brain.
+Every company with serious systems engineering has institutional knowledge locked inside heavyweight compute tools. Cooperage connects them and lets AI orchestrate across all of them.
 
 ## How it works
 
