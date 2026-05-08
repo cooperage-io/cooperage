@@ -26,7 +26,7 @@ The LLM orchestrates tools across isolated containers. Data flows through a shar
 
 ## Quick start
 
-**Prerequisites:** Python 3.11+, [uv](https://docs.astral.sh/uv/getting-started/installation/), Docker running.
+**Prerequisites:** Python 3.11+, [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
 ```bash
 git clone https://github.com/cooperage-io/cooperage.git && cd cooperage
