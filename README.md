@@ -251,4 +251,4 @@ uv run pytest -v
 
 ## License
 
-Public core: [MIT](LICENSE). Enterprise: BSL License — see [cooperage-enterprise](https://github.com/cooperage-io/cooperage-enterprise).
+Public core: [MIT](LICENSE). Enterprise: BSL License
